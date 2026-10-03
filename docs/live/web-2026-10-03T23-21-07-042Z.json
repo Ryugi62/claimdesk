@@ -1,0 +1,64 @@
+{
+  "authenticator": "Chromium virtual WebAuthn authenticator (CTAP2, internal, user-verified)",
+  "log": [
+    {
+      "step": "A-registered-with-passkey",
+      "ref": "WF-2026-PUBLICGOOD",
+      "seconds": 3.883,
+      "account": "0xd226f57F714Ba2eBBd4f2bD4484137225b73413D",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x930981682d48f0965d469d0012671f041dbafb3e2759625bfa055c81c355b458"
+    },
+    {
+      "step": "A-console-clear",
+      "banner": "The paperwork names the registered account. Clearing pays it now."
+    },
+    {
+      "step": "A-paid",
+      "amount": "$5,000.00",
+      "local": "≈ 6,741,400 KRW",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x82ec89544d2d8a1e0bcab19f4d97f4afe8df3d0c83a5f4d364d428e852e0d370"
+    },
+    {
+      "step": "A-sent-from-account",
+      "seconds": 1.836,
+      "summary": "Sent $12.50 to 0x0000…dEaD · tag DEPOSIT-TAG-1234 · view",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x7f9cd9eb5773a25d1526d7cdedc8d8afe19035c0eede2ae16b8914c33e0876e4"
+    },
+    {
+      "step": "F-forwardee-registered-first",
+      "ref": "WF-2026-TEMPO-05",
+      "account": "0x46f92a2fE652B440AAB415b080331929aadBe46f"
+    },
+    {
+      "step": "F-console-sees",
+      "registered": "0x46f92a2fE652B440AAB415b080331929aadBe46f",
+      "paperworkFor": "0x632D5B1537becC545EC1CB53494e9fA899B2b613",
+      "binding": "mismatch"
+    },
+    {
+      "step": "F-organizer-reissued",
+      "tx": "0x13ae58bd0d607beb7352f5d2155059958882da956acd90c5a7d9dc096d6478b6"
+    },
+    {
+      "step": "F-winner-paid",
+      "account": "0x632D5B1537becC545EC1CB53494e9fA899B2b613",
+      "intruder": "0x46f92a2fE652B440AAB415b080331929aadBe46f",
+      "banner": "The paperwork names the registered account. Clearing pays it now.",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x0e62d4b419eb74948fc4291e19c819c61a534178c611067657ee27a8e60633e6"
+    },
+    {
+      "step": "console-1280",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-390",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-without-token",
+      "status": 403
+    }
+  ]
+}

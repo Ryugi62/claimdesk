@@ -69,7 +69,7 @@ npm test                       # TypeScript tests: domain, application, adapters
 npm run e2e:moderato           # the whole contract story on Tempo testnet → docs/live/moderato-*.json
 
 npm run cli -- deploy          # escrow + organizer key + separate fee-payer key (testnet faucet)
-npm run cli -- batch examples/worldsfair-demo.csv --days 14   # one transaction; private links → batches/ (owner-only)
+npm run cli -- batch examples/worldsfair-demo.csv --days 21   # one transaction; private links → batches/ (owner-only)
 npm run relay                  # winner pages + sponsoring relay  http://localhost:5174  (fee-payer key only)
 npm run console                # organizer console (organizer key, local only) — open the printed URL with its token
 node scripts/web-claim.mjs batches/<file>.links.json <REF> <OTHER_REF> "<console URL>"   # drives the passkey flows

@@ -54,12 +54,12 @@ async function main() {
     }
     case 'batch': {
       const file = rest[0]
-      const seconds = Number(flag('seconds', String(Number(flag('days', '14')) * 86_400)))
+      const seconds = Number(flag('seconds', String(Number(flag('days', '21')) * 86_400)))
       const base = flag('base', 'http://localhost:5174')!
       const e = escrow()
       const winners = parseWinners(readFileSync(file, 'utf8'), 6)
       const plan = createBatch(winners, viemClaimKeys, { baseUrl: base, escrow: e.address, chainId: CHAIN.id })
-      const expiresAt = Number((await org.getBlock()).timestamp) + seconds
+      const expiresAt = Number((await org.getBlock()).timestamp) + seconds + 600 // margin: the escrow checks against the block that includes the tx
       const tx = await fundBatch(plan, e, PATH_USD, expiresAt)
       mkdirSync('batches', { recursive: true })
       const out = `batches/${file.replace(/^.*\//, '').replace(/\.csv$/, '')}-${Date.now()}.links.json`
@@ -111,7 +111,7 @@ async function main() {
       break
     }
     default:
-      console.log('commands: deploy [--min-ttl-days 14] [--tax-account 0x… --max-withhold-pct 30] | batch <winners.csv> [--days N] [--base URL] | clear <REF> --recipient 0x… --paperwork "..." [--withhold-pct N] | clear <REF> --bearer | reissue <REF> | verify <REF> | revoke <REF> | reclaim <REF> | status')
+      console.log('commands: deploy [--min-ttl-days 14] [--tax-account 0x… --max-withhold-pct 30] | batch <winners.csv> [--days 21] [--base URL] | clear <REF> --recipient 0x… --paperwork "..." [--withhold-pct N] | clear <REF> --bearer | reissue <REF> | verify <REF> | revoke <REF> | reclaim <REF> | status')
   }
 }
 

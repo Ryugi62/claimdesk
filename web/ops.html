@@ -7,7 +7,8 @@
 <style>/*css*/
 main{max-width:960px}
 .rows{margin-top:24px;display:grid;gap:12px}
-.row{background:var(--soft);border-radius:16px;padding:16px 18px;display:grid;grid-template-columns:1.2fr 1.6fr .8fr 1.2fr auto;gap:12px;align-items:center}
+.row{background:var(--soft);border-radius:16px;padding:16px 18px;display:grid;grid-template-columns:minmax(190px,1fr) minmax(170px,1.2fr) 110px minmax(220px,1.8fr) auto;gap:12px;align-items:center}
+.row .ref{white-space:nowrap}
 .row .ref{font-weight:700}
 .row .amt{text-align:right;font-variant-numeric:tabular-nums}
 .row .acct{font:13px/1.4 ui-monospace,Menlo,monospace;color:var(--sub);word-break:break-all}
@@ -96,8 +97,8 @@ function ask(list) {
     const a = addr.value.trim().toLowerCase(), r = (one.registered ?? '').toLowerCase()
     bind.innerHTML = !a ? '<div class="bind none">Paste the payout address from the winner\'s paperwork. Claimdesk never takes it from the chain.</div>'
       : a === r ? '<div class="bind match">The paperwork names the registered account. Clearing pays it now.</div>'
-      : '<div class="bind mismatch">The paperwork names a different account than the one registered with the link. The escrow will refuse — issue a new link instead.</div>'
-    ok.disabled = !a
+      : '<div class="bind mismatch">The paperwork names a different account than the one registered with the link — clearing is blocked (the escrow would refuse too). Issue a new link instead.</div>'
+    ok.disabled = !a || a !== r
   }
   addr.oninput = check; check()
   dlg.showModal()

@@ -111,9 +111,18 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
       const url = (cfg.paperworkUrl ?? 'paperwork?ref={ref}&address={address}').replace('{ref}', encodeURIComponent(ref)).replace('{address}', registered)
       app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="account">Open my account</a></p>`)
       button('Complete paperwork', async () => { location.href = url })
+      // paid automatically on clearance — watch for it and switch to the receipt by itself
+      const watch = setInterval(async () => {
+        const now = await readAward(client, escrow, id).catch(() => undefined)
+        if (now && now.status !== 'Registered') { clearInterval(watch); await render(cfg, escrow, ref) }
+      }, 4000)
     } else {
-      app.insertAdjacentHTML('beforeend', `<p class="err">This award is registered to an account this device does not hold. If that was not you, tell the organizer — they can issue you a new link before approving paperwork.</p>`)
-      cta.style.display = 'none'
+      app.insertAdjacentHTML('beforeend', `<p class="err" id="notmine">This award is registered to an account this device does not hold. If that was not you, send your paperwork for your own account: the organizer will see that it does not match, and issue you a new link before paying anyone.</p>`)
+      button("That wasn't me — send my paperwork", async () => {
+        cta.textContent = 'Waiting for your fingerprint or face…'
+        const mineNow = accountOf(savedPasskey() ?? (await createPasskey(`Claimdesk ${ref}`)))
+        location.href = (cfg.paperworkUrl ?? 'paperwork?ref={ref}&address={address}').replace('{ref}', encodeURIComponent(ref)).replace('{address}', mineNow.address)
+      })
     }
     return
   }
