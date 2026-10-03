@@ -8,3 +8,8 @@ dist/
 .DS_Store
 batches/
 .cache/
+docs/video/pitch.json
+docs/video/demo.json
+docs/video/work-*/
+docs/video/pitch.template.json
+paperwork/

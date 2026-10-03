@@ -14,6 +14,7 @@ import { memoToRef, awardMemo } from '../domain/memo'
 import { describe } from '../domain/status'
 import { encodeClaimLink } from '../domain/claimLink'
 import { recordPaperwork, verifyAgainst } from './paperwork'
+import { latestSubmissions, bindingCheck } from './paperworkInbox'
 import { send, json, body, consoleAllowed } from './http'
 import { CHAIN, EXPLORER, requireEnv, readEnv } from './config'
 import type { Hex } from '../application/ports'
@@ -31,7 +32,12 @@ const allLinks = () => linkFiles().flatMap((f) => (JSON.parse(readFileSync(f, 'u
 
 async function board() {
   const b = await statusBoard(escrow)
-  return Object.values(b).map((v) => ({ ...v, ref: memoToRef(v.id), says: describe(v).organizer, tone: describe(v).tone }))
+  const inbox = latestSubmissions()
+  return Object.values(b).map((v) => {
+    const ref = memoToRef(v.id)
+    const paperwork = inbox[ref]
+    return { ...v, ref, says: describe(v).organizer, tone: describe(v).tone, paperwork: paperwork ?? null, binding: bindingCheck(v.registered, paperwork?.address) }
+  })
 }
 
 createServer(async (req, res) => {
@@ -44,18 +50,22 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/api/status') return json(res, 200, { program: PROGRAM, escrow: ESCROW, explorer: EXPLORER, chainId: CHAIN.id, rows: await board() })
 
     if (req.method === 'POST' && path === '/api/clear') {
-      // { items: [{ ref, paperwork, expectedRecipient, withholdBps?, taxAccount? }] } — several awards → one transaction
-      const { items } = JSON.parse(await body(req)) as { items: { ref: string; paperwork: string; expectedRecipient: string; withholdBps?: number; taxAccount?: string }[] }
+      // { items: [{ ref, expectedRecipient, note?, withholdBps? }] } — several awards → one transaction.
+      // expectedRecipient comes from the paperwork (inbox or pasted by the organizer), never from chain state.
+      const { items } = JSON.parse(await body(req)) as { items: { ref: string; expectedRecipient?: string; note?: string; withholdBps?: number; bearer?: boolean }[] }
       const rows = await board()
       const planned = items.map((i) => {
         const row = rows.find((r) => r.ref === i.ref)
         if (!row) throw new Error(`unknown award ${i.ref}`)
-        const expected = (i.expectedRecipient || ZERO) as Hex
-        const { hash } = recordPaperwork(i.ref, expected, i.paperwork)
+        if (!i.bearer && !i.expectedRecipient) throw new Error(`${i.ref}: no payout address from paperwork — paste the address the winner's paperwork names`)
+        const expected = (i.bearer ? ZERO : i.expectedRecipient) as Hex
+        const p = row.paperwork
+        const summary = [p ? `paperwork ${p.at}: ${p.legalName}, tax residence ${p.taxCountry}, signed as ${p.formSignedAs}, payout ${p.address}` : 'paperwork outside Claimdesk', i.note ?? ''].filter(Boolean).join(' | ')
+        const { hash } = recordPaperwork(i.ref, expected, summary)
         const withheld = i.withholdBps ? ((row.amount ?? 0n) * BigInt(i.withholdBps)) / 10_000n : 0n
-        return { id: awardMemo(i.ref), paperworkHash: hash, expectedRecipient: expected, withheld, taxAccount: (i.taxAccount || ZERO) as Hex }
+        return { id: awardMemo(i.ref), paperworkHash: hash, expectedRecipient: expected, withheld }
       })
-      const tx = planned.length === 1 ? await escrow.clear(planned[0].id, planned[0].paperworkHash, planned[0].expectedRecipient, planned[0].withheld, planned[0].taxAccount) : await escrow.clearMany(planned)
+      const tx = planned.length === 1 ? await escrow.clear(planned[0].id, planned[0].paperworkHash, planned[0].expectedRecipient, planned[0].withheld) : await escrow.clearMany(planned)
       return json(res, 200, { tx: tx.hash, cleared: items.map((i) => i.ref) })
     }
     if (req.method === 'POST' && path === '/api/revoke') {

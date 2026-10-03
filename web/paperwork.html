@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Prize paperwork · Claimdesk</title>
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+  <div class="program" id="program">Prize paperwork</div>
+  <h1>Confirm who you are and where to pay</h1>
+  <p>This stands in for your organizer's identity and tax-form provider. What you submit goes to the organizer only; the payout address below is the account you registered with your link, and the organizer approves your paperwork <b>for this address</b>.</p>
+  <form id="f" class="card">
+    <label>Award<input id="ref" readonly></label>
+    <label>Payout account (from your link)<input id="address" readonly></label>
+    <label>Full legal name<input id="legalName" autocomplete="name" required></label>
+    <label>Tax residence (2-letter country code)<input id="taxCountry" maxlength="2" placeholder="KR" required></label>
+    <label>Sign: type your full legal name again<input id="formSignedAs" required></label>
+    <p class="hint">By signing you certify the details above, as on a W-8BEN. A real provider would also verify your identity document here.</p>
+  </form>
+  <p id="msg"></p>
+</main>
+<div class="cta"><button id="cta">Submit paperwork</button></div>
+<script type="module">
+const q = new URLSearchParams(location.search)
+for (const k of ['ref', 'address']) document.getElementById(k).value = q.get(k) ?? ''
+const cta = document.getElementById('cta'), msg = document.getElementById('msg')
+cta.onclick = async () => {
+  const body = Object.fromEntries(['ref', 'address', 'legalName', 'taxCountry', 'formSignedAs'].map((k) => [k, document.getElementById(k).value]))
+  cta.disabled = true
+  const r = await fetch('api/paperwork', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const out = await r.json()
+  if (!r.ok) { cta.disabled = false; msg.className = 'err'; msg.textContent = out.error; return }
+  msg.className = ''
+  document.getElementById('f').remove()
+  msg.innerHTML = '<span class="chip ok">Paperwork sent</span><p>Your organizer will approve it for your account and you will be paid automatically. You can close this page.</p>'
+  cta.textContent = 'Back to my award'
+  cta.disabled = false
+  cta.onclick = () => history.back()
+}
+</script>
+</body>
+</html>

@@ -54,8 +54,12 @@ export async function txRef(client: TempoClient, receipt: { transactionHash: Hex
 }
 
 /** Deploys a new ClaimEscrow; `organizer` becomes its owner (defaults to the deployer). */
-export async function deployEscrow(client: TempoClient, opts: { organizer?: Hex; minTtlSeconds?: number } = {}): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
-  const hash = await client.deployContract({ abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex, args: [opts.organizer ?? client.account!.address, BigInt(opts.minTtlSeconds ?? 7 * 86_400)], account: client.account!, chain: client.chain })
+export async function deployEscrow(client: TempoClient, opts: { organizer?: Hex; minTtlSeconds?: number; taxAccount?: Hex; maxWithholdingBps?: number } = {}): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
+  const hash = await client.deployContract({
+    abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex,
+    args: [opts.organizer ?? client.account!.address, BigInt(opts.minTtlSeconds ?? 7 * 86_400), opts.taxAccount ?? ZERO, opts.maxWithholdingBps ?? 0],
+    account: client.account!, chain: client.chain,
+  })
   const receipt = await client.waitForTransactionReceipt({ hash })
   if (!receipt.contractAddress) throw new Error('deploy failed')
   return { address: receipt.contractAddress as Hex, tx: await txRef(client, receipt as never), block: receipt.blockNumber }
@@ -153,12 +157,12 @@ export class TempoEscrow implements EscrowGateway {
       ...awards.map((a) => ({ to: this.address, data: encodeFunctionData({ abi: claimEscrowAbi, functionName: 'fund', args: [a.id, a.token, a.amount, BigInt(a.expiresAt), a.claimSigner] }) })),
     ])
   }
-  clear(id: Hex, paperworkHash: Hex, expectedRecipient: Hex, withheld = 0n, taxAccount: Hex = ZERO) {
-    return this.send([this.call('clear', [id, paperworkHash, expectedRecipient, withheld, taxAccount])])
+  clear(id: Hex, paperworkHash: Hex, expectedRecipient: Hex, withheld = 0n) {
+    return this.send([this.call('clear', [id, paperworkHash, expectedRecipient, withheld])])
   }
   /** Several clearances in one Tempo transaction (batched calls — all or nothing). */
-  clearMany(items: { id: Hex; paperworkHash: Hex; expectedRecipient: Hex; withheld?: bigint; taxAccount?: Hex }[]) {
-    return this.send(items.map((i) => this.call('clear', [i.id, i.paperworkHash, i.expectedRecipient, i.withheld ?? 0n, i.taxAccount ?? ZERO])))
+  clearMany(items: { id: Hex; paperworkHash: Hex; expectedRecipient: Hex; withheld?: bigint }[]) {
+    return this.send(items.map((i) => this.call('clear', [i.id, i.paperworkHash, i.expectedRecipient, i.withheld ?? 0n])))
   }
   reissueLink(id: Hex, newSigner: Hex) { return this.send([this.call('reissueLink', [id, newSigner])]) }
   revoke(id: Hex) { return this.send([this.call('revoke', [id])]) }

@@ -1,9 +1,10 @@
 /**
  * Organizer CLI (testnet).
- *   npm run cli -- deploy                          new escrow + a separate fee-payer key (both funded from the testnet faucet)
+ *   npm run cli -- deploy [--min-ttl-days 14] [--tax-account 0x… --max-withhold-pct 30]
+ *                                                  new escrow + a separate fee-payer key (both funded from the testnet faucet)
  *   npm run cli -- batch winners.csv --days 14     fund every award in ONE transaction; private claim links → batches/
- *   npm run cli -- clear <REF> --paperwork "<what was collected>" [--recipient 0x…] [--withhold-pct 30 --tax-account 0x…]
- *                                                  pays the registered account now (it must equal --recipient if given)
+ *   npm run cli -- clear <REF> --recipient 0x… --paperwork "<what was collected>" [--withhold-pct 30]
+ *                                                  --recipient = the payout address written in the winner's paperwork (never read from chain)
  *   npm run cli -- reissue <REF>                   new link key; the old link and its registration stop counting
  *   npm run cli -- verify <REF>                    re-derive the on-chain paperwork hash from the local record
  *   npm run cli -- revoke <REF>                    before clearance; money returns now
@@ -44,7 +45,8 @@ async function main() {
       const feePayer = privateKeyToAccount(key('FEE_PAYER_KEY_TESTNET'))
       await Actions.faucet.fundSync(org, { account: organizer.address })
       await Actions.faucet.fundSync(org, { account: feePayer.address })
-      const d = await deployEscrow(org, { minTtlSeconds: Number(flag('min-ttl-days', '7')) * 86_400 })
+      const tax = flag('tax-account') as Hex | undefined
+      const d = await deployEscrow(org, { minTtlSeconds: Number(flag('min-ttl-days', '14')) * 86_400, taxAccount: tax ?? ZERO, maxWithholdingBps: tax ? Math.round(Number(flag('max-withhold-pct', '30')) * 100) : 0 })
       setEnv('ESCROW', d.address)
       setEnv('ESCROW_BLOCK', d.block.toString())
       console.log(`escrow ${d.address} (organizer ${organizer.address}, fee payer ${feePayer.address})\n${EXPLORER}/address/${d.address}`)
@@ -70,13 +72,14 @@ async function main() {
       const ref = rest[0]
       const e = escrow()
       const award = await readAward(org, e.address, awardMemo(ref))
-      const expected = (award.registered ?? ZERO) as Hex
-      const given = flag('recipient')
-      if (given && given.toLowerCase() !== expected.toLowerCase()) throw new Error(`registered account is ${expected}, not ${given} — reissue the link if the winner did not register it`)
+      const bearer = rest.includes('--bearer')
+      const expected = (bearer ? ZERO : flag('recipient')) as Hex | undefined
+      if (!expected) throw new Error('pass --recipient <the payout address written in the paperwork> (or --bearer to open a bearer claim)')
+      if (!bearer && expected.toLowerCase() !== (award.registered ?? '').toLowerCase()) throw new Error(`the paperwork names ${expected} but the link registered ${award.registered ?? 'nothing'} — reissue the link`)
       const { hash } = recordPaperwork(ref, expected, flag('paperwork', '') ?? '')
       const pct = Number(flag('withhold-pct', '0'))
       const withheld = (award.amount * BigInt(Math.round(pct * 100))) / 10_000n
-      const tx = await e.clear(awardMemo(ref), hash, expected, withheld, (flag('tax-account') ?? ZERO) as Hex)
+      const tx = await e.clear(awardMemo(ref), hash, expected, withheld)
       console.log(`cleared ${ref} for ${expected === ZERO ? 'a bearer claim' : expected}${withheld ? `, withheld ${formatUnits(withheld, 6)}` : ''} (paperwork hash ${hash})\n${EXPLORER}/tx/${tx.hash}`)
       break
     }
@@ -108,7 +111,7 @@ async function main() {
       break
     }
     default:
-      console.log('commands: deploy [--min-ttl-days 7] | batch <winners.csv> [--days N] [--base URL] | clear <REF> --paperwork "..." [--recipient 0x…] [--withhold-pct N --tax-account 0x…] | reissue <REF> | verify <REF> | revoke <REF> | reclaim <REF> | status')
+      console.log('commands: deploy [--min-ttl-days 14] [--tax-account 0x… --max-withhold-pct 30] | batch <winners.csv> [--days N] [--base URL] | clear <REF> --recipient 0x… --paperwork "..." [--withhold-pct N] | clear <REF> --bearer | reissue <REF> | verify <REF> | revoke <REF> | reclaim <REF> | status')
   }
 }
 

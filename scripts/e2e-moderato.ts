@@ -70,8 +70,9 @@ async function main() {
   await Actions.faucet.fundSync(org, { account: feePayer.address })
   record('keys', { organizer: organizer.address, feePayer: feePayer.address })
 
-  const dep = await deployEscrow(org, { minTtlSeconds: 60 })
-  record('deploy', { escrow: dep.address, minTtlSeconds: 60, tx: dep.tx.hash, link: `${EXPLORER}/address/${dep.address}` })
+  const taxAccount = privateKeyToAccount(generatePrivateKey())
+  const dep = await deployEscrow(org, { minTtlSeconds: 60, taxAccount: taxAccount.address, maxWithholdingBps: 3_000 })
+  record('deploy', { escrow: dep.address, minTtlSeconds: 60, note: 'test escrow — 60 s floor only so the expiry path can run inside this script; the CLI default is 14 days', taxAccount: taxAccount.address, maxWithholdingBps: 3_000, tx: dep.tx.hash, link: `${EXPLORER}/address/${dep.address}` })
   const escrow = new TempoEscrow(org, dep.address, dep.block)
 
   const winners = parseWinners('ref,amount,label\nWF-E2E-A,25,registers early\nWF-E2E-F,20,forwarded link\nWF-E2E-G,100,withholding\nWF-E2E-B,15,bearer\nWF-E2E-E,7,redirect\nWF-E2E-C,10,revoked\nWF-E2E-D,5,expires\n', 6)
@@ -102,7 +103,7 @@ async function main() {
   // F — a forwarded link registers first; the organizer's clearance names the real winner → refused → new link → paid
   const wF = fresh(); const thief = fresh()
   await registerAccount(P.F.link, thief.address, viemClaimKeys, gw(tempoClient(CHAIN, thief)), { chainId: CHAIN.id })
-  record('F-clear-for-real-winner-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.F.id, hashOf('F kyc'), wF.address, 0n, ZERO])))
+  record('F-clear-for-real-winner-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.F.id, hashOf('F kyc'), wF.address, 0n])))
   const newKey = viemClaimKeys.create()
   const reissue = await escrow.reissueLink(P.F.id, newKey.address)
   record('F-old-link-refused', await mustRevert(tempoClient(CHAIN, thief), feePayer, dep.address, call('register', [P.F.id, thief.address, await sign('register', P.F.ref, thief.address)])))
@@ -112,9 +113,10 @@ async function main() {
   record('F-reissued-and-paid', { reissueTx: reissue.hash, registerTx: regF.hash, clearTx: clrF.hash, winnerAfter: await balanceOf(org, PATH_USD, wF.address), thiefAfter: await balanceOf(org, PATH_USD, thief.address) })
 
   // G — withholding at source
-  const wG = fresh(); const taxAccount = fresh()
+  const wG = fresh()
   await registerAccount(P.G.link, wG.address, viemClaimKeys, gw(tempoClient(CHAIN, wG)), { chainId: CHAIN.id })
-  const clrG = await escrow.clear(P.G.id, hashOf('G w8ben no treaty'), wG.address, 30_000_000n, taxAccount.address)
+  record('G-withholding-above-cap-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.G.id, hashOf('G'), wG.address, 30_000_001n])))
+  const clrG = await escrow.clear(P.G.id, hashOf('G w8ben no treaty'), wG.address, 30_000_000n)
   record('G-withholding', { clearTx: clrG.hash, winnerAfter: await balanceOf(org, PATH_USD, wG.address), taxAccountAfter: await balanceOf(org, PATH_USD, taxAccount.address) })
 
   // B — bearer path

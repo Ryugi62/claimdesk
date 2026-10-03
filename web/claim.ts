@@ -63,7 +63,7 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
   const how = `<details><summary>How this works</summary><p>A passkey is the fingerprint or face unlock on this device. It becomes your account on the Tempo network — no app, no seed phrase. The organizer pays the network fee. The money is already locked for you, and it moves only after the organizer approves your paperwork.</p></details>`
   const expires = `<p>Set aside until ${esc(new Date(award.expiresAt * 1000).toUTCString().replace(/:\d\d GMT/, ' UTC'))}.</p>`
 
-  const events = award.status === 'Claimed' || award.status === 'Registered' ? await escrowEvents(client, escrow, BigInt(cfg.escrows?.[escrow.toLowerCase()] ?? 0), id).catch(() => []) : []
+  const events = award.status === 'Claimed' || award.status === 'Registered' || award.status === 'Funded' ? await escrowEvents(client, escrow, BigInt(cfg.escrows?.[escrow.toLowerCase()] ?? 0), id).catch(() => []) : []
   if (award.status === 'Claimed') {
     const paid = events.find((e) => e.kind === 'Claimed')
     const cleared = events.find((e) => e.kind === 'Cleared')
@@ -75,6 +75,9 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
   }
   app.innerHTML = `${head}<span class="chip ${d.tone}">${chip}</span><p>${esc(d.winner)}</p>${['Funded', 'Registered', 'Cleared'].includes(award.status) ? expires : ''}${how}`
 
+  if (award.status === 'Funded' && events.some((e) => e.kind === 'LinkReissued')) {
+    app.insertAdjacentHTML('afterbegin', `<span class="chip warn">The organizer issued a new link for this award</span>`)
+  }
   const getAccount = async () => accountOf(savedPasskey() ?? (await createPasskey(`Claimdesk ${ref}`)))
   if (award.status === 'Funded') {
     app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="#" id="existing">I already have an address</a>${mine ? '' : ' · <a href="#" id="signin">Use a passkey I made before</a>'}</p>`)
@@ -101,11 +104,17 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
     return
   }
   if (award.status === 'Registered' && registered) {
-    const reg = events.find((e) => e.kind === 'Registered')
+    const reg = events.find((e) => e.kind === 'Registered' || e.kind === 'RecipientChanged')
     const regTx = reg?.txHash ?? recalled(escrow, ref)
-    app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr" id="registered">${esc(registered)}</div><p>Your organizer checks your paperwork for this address and pays it. If their form asks for your address, copy this one.</p>${regTx ? `<p class="alt">Registered on-chain: <a id="regtx" href="${esc(cfg.explorer)}/tx/${esc(regTx)}" target="_blank" rel="noopener">${esc(short(regTx))}</a></p>` : ''}</div>`)
-    if (isMine(registered)) button('Open my account', async () => { location.href = 'account' })
-    else cta.style.display = 'none'
+    app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr" id="registered">${esc(registered)}</div><p>Next: complete the paperwork for this account. The organizer approves it for this address, and the payment goes nowhere else.</p>${regTx ? `<p class="alt">Registered on-chain: <a id="regtx" href="${esc(cfg.explorer)}/tx/${esc(regTx)}" target="_blank" rel="noopener">${esc(short(regTx))}</a></p>` : ''}</div>`)
+    if (isMine(registered)) {
+      const url = (cfg.paperworkUrl ?? 'paperwork?ref={ref}&address={address}').replace('{ref}', encodeURIComponent(ref)).replace('{address}', registered)
+      app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="account">Open my account</a></p>`)
+      button('Complete paperwork', async () => { location.href = url })
+    } else {
+      app.insertAdjacentHTML('beforeend', `<p class="err">This award is registered to an account this device does not hold. If that was not you, tell the organizer — they can issue you a new link before approving paperwork.</p>`)
+      cta.style.display = 'none'
+    }
     return
   }
   if (award.status === 'Cleared') {

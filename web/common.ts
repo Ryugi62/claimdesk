@@ -13,6 +13,8 @@ export interface Config {
   sponsor: string
   explorer: string
   program: string
+  /** where the winner completes paperwork; {ref} and {address} are substituted */
+  paperworkUrl?: string
   /** escrow → deploy block, so receipts can find their transaction quickly */
   escrows?: Record<string, number>
 }

@@ -25,6 +25,9 @@ dialog textarea{width:100%;min-height:84px;margin-top:6px;border:1px solid var(-
 dialog .btns{display:flex;gap:8px;margin-top:16px}
 dialog .btns button{flex:1;height:48px;border:0;border-radius:12px;font-weight:700;font-size:15px;cursor:pointer}
 dialog .ok{background:var(--blue);color:#fff}dialog .no{background:var(--soft);color:var(--sub)}
+dialog .ok:disabled{background:var(--line);color:var(--mute)}
+.bind{margin-top:12px;border-radius:12px;padding:10px 12px;font-size:14px}.bind.match{background:var(--ok-bg);color:var(--ok)}.bind.mismatch{background:var(--no-bg);color:var(--no)}.bind.none{background:var(--warn-bg);color:var(--warn)}
+.pw{font-size:13px;color:var(--sub)}
 @media (max-width:720px){.row{grid-template-columns:1fr auto;}.row .acct{grid-column:1/-1}.row .actions{grid-column:1/-1;justify-content:flex-start}.row .chip{grid-column:1/-1;justify-self:start}}
 </style>
 </head>
@@ -34,16 +37,17 @@ dialog .ok{background:var(--blue);color:#fff}dialog .no{background:var(--soft);c
   <h1>Who has been paid</h1>
   <div class="amount" id="paid">—</div>
   <div class="unit" id="paidline">reading the chain…</div>
-  <div class="bar"><a href="#" id="export">Export claim links for mail merge (CSV)</a><button id="clearSel" hidden>Clear selected (one transaction)</button></div>
+  <div class="bar"><a href="#" id="export">Export claim links for mail merge (CSV)</a><button id="clearSel" hidden>Clear selected — paperwork matches (one transaction)</button></div>
   <div class="rows" id="rows"></div>
   <details><summary>Where these numbers come from</summary><p>Every row is rebuilt from the escrow contract's own events (Funded, Registered, Cleared, Claimed, Revoked, Reclaimed) on Tempo — not from a database. Each payout carries the award reference as its 32-byte transfer memo. Clearing writes your paperwork note to <code>paperwork/records.jsonl</code> on this machine; only its salted hash goes on-chain, and "Verify" re-derives it.</p><p id="escrow"></p></details>
 </main>
 <dialog id="dlg"><form method="dialog">
   <h2 id="dlgTitle">Clear paperwork</h2>
   <div class="sum" id="dlgSum"></div>
-  <label>What did you collect and check? (stays on this machine)<textarea id="dlgNote" required placeholder="e.g. W-8BEN signed 2026-10-06; identity check ref 4821; address above confirmed by the winner in the form"></textarea></label>
-  <label>Withhold tax at source (%)<input id="dlgBps" inputmode="decimal" placeholder="0"></label>
-  <label>Tax account (if withholding)<input id="dlgTax" placeholder="0x…"></label>
+  <div id="dlgBind"></div>
+  <label>Payout address from the paperwork (not from the chain)<input id="dlgAddr" placeholder="0x… as written in the winner's paperwork"></label>
+  <label>Your note (stays on this machine)<textarea id="dlgNote" placeholder="e.g. identity check ref 4821 passed"></textarea></label>
+  <label>Withhold tax at source (%, up to the escrow's fixed cap)<input id="dlgBps" inputmode="decimal" placeholder="0"></label>
   <div class="btns"><button class="no" value="cancel">Cancel</button><button class="ok" value="ok" id="dlgOk">Clear and pay</button></div>
 </form></dialog>
 <script type="module">
@@ -64,28 +68,47 @@ async function load() {
   document.getElementById('paid').textContent = `${paid.length} of ${live.length}`
   document.getElementById('paidline').textContent = `winners paid · $${fmt(paid.reduce((n, x) => n + BigInt(x.amount ?? 0), 0n))} of $${fmt(live.reduce((n, x) => n + BigInt(x.amount ?? 0), 0n))}`
   document.getElementById('rows').innerHTML = rows.map((x) => {
-    const acct = x.recipient ? `paid → <a href="${explorer}/tx/${x.txs.Claimed}" target="_blank" rel="noopener">${esc(x.recipient)}</a>` : x.registered ? `registered: ${esc(x.registered)}` : 'no account yet'
-    const canClear = x.status === 'Funded' || x.status === 'Registered'
-    const sel = x.status === 'Registered' ? `<input type="checkbox" data-sel="${esc(x.ref)}" aria-label="select ${esc(x.ref)}" style="width:auto;height:auto;display:inline;margin:0 6px 0 0">` : ''
-    const act = canClear ? `<button data-clear="${esc(x.ref)}">${x.status === 'Registered' ? 'Clear &amp; pay' : 'Clear (bearer)'}</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>` : x.paperworkHash ? `<button class="ghost" data-verify="${esc(x.ref)}">Verify paperwork</button>` : ''
-    return `<div class="row"><div class="ref">${sel}${esc(x.ref)}</div><span class="chip ${x.tone}">${esc(x.says)}</span><div class="amt">$${fmt(x.amount ?? 0)}</div><div class="acct">${acct}</div><div class="actions">${act}</div></div>`
+    const short = (a) => a.slice(0, 8) + '…' + a.slice(-6)
+    const acct = x.recipient ? `paid → <a href="${explorer}/tx/${x.txs.Claimed}" target="_blank" rel="noopener">${esc(short(x.recipient))}</a>` : x.registered ? `registered ${esc(short(x.registered))}` : 'no account yet'
+    const pw = x.status === 'Claimed' || x.status === 'Revoked' || x.status === 'Reclaimed' ? '' : x.paperwork ? `<div class="pw">paperwork: ${esc(x.paperwork.legalName)} (${esc(x.paperwork.taxCountry)}) for ${esc(short(x.paperwork.address))} — <b>${x.binding === 'match' ? 'matches the registered account' : x.binding === 'mismatch' ? 'DOES NOT match the registered account — issue a new link' : 'no account registered yet'}</b></div>` : '<div class="pw">paperwork: not received</div>'
+    const canClear = x.status === 'Registered'
+    const sel = x.status === 'Registered' && x.binding === 'match' ? `<input type="checkbox" data-sel="${esc(x.ref)}" aria-label="select ${esc(x.ref)}" style="width:auto;height:auto;display:inline;margin:0 6px 0 0">` : ''
+    const act = canClear ? `<button data-clear="${esc(x.ref)}">Clear &amp; pay</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
+      : x.status === 'Funded' ? `<button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button><button class="ghost" data-bearer="${esc(x.ref)}" title="Pays whoever holds the link — only if you delivered it to a verified person">Advanced: open bearer claim</button>`
+      : x.paperworkHash ? `<button class="ghost" data-verify="${esc(x.ref)}">Verify paperwork</button>` : ''
+    return `<div class="row"><div class="ref">${sel}${esc(x.ref)}</div><span class="chip ${x.tone}">${esc(x.says)}</span><div class="amt">$${fmt(x.amount ?? 0)}</div><div class="acct">${acct}${pw}</div><div class="actions">${act}</div></div>`
   }).join('')
-  document.getElementById('clearSel').hidden = !rows.some((x) => x.status === 'Registered')
+  document.getElementById('clearSel').hidden = !rows.some((x) => x.status === 'Registered' && x.binding === 'match')
   document.getElementById('escrow').innerHTML = `Escrow <a href="${explorer}/address/${s.escrow}" target="_blank" rel="noopener">${esc(s.escrow)}</a> on chain ${s.chainId}.`
 }
 function ask(list) {
   const dlg = document.getElementById('dlg')
+  const one = list.length === 1 ? list[0] : null
   const total = list.reduce((n, x) => n + BigInt(x.amount ?? 0), 0n)
-  document.getElementById('dlgTitle').textContent = list.length === 1 ? `Clear ${list[0].ref}` : `Clear ${list.length} awards`
-  document.getElementById('dlgSum').innerHTML = list.map((x) => `<div><b>$${fmt(x.amount ?? 0)}</b> · ${esc(x.ref)} → ${x.registered ? `<b>${esc(x.registered)}</b> (paid now)` : 'opens a bearer claim for the link holder'}</div>`).join('') + (list.length > 1 ? `<div>Total <b>$${fmt(total)}</b>, one transaction.</div>` : '')
+  document.getElementById('dlgTitle').textContent = one ? `Clear ${one.ref}` : `Clear ${list.length} awards`
+  document.getElementById('dlgSum').innerHTML = list.map((x) => `<div><b>$${fmt(x.amount ?? 0)}</b> · ${esc(x.ref)} · registered ${esc(x.registered ?? '—')}</div>`).join('') + (list.length > 1 ? `<div>Total <b>$${fmt(total)}</b>, one transaction, each to the address its own paperwork names.</div>` : '')
+  const addr = document.getElementById('dlgAddr'), ok = document.getElementById('dlgOk'), bind = document.getElementById('dlgBind')
+  addr.value = one?.paperwork?.address ?? ''
+  addr.closest('label').hidden = !one
   document.getElementById('dlgNote').value = ''
+  const check = () => {
+    if (!one) { bind.innerHTML = ''; ok.disabled = false; return }
+    const a = addr.value.trim().toLowerCase(), r = (one.registered ?? '').toLowerCase()
+    bind.innerHTML = !a ? '<div class="bind none">Paste the payout address from the winner\'s paperwork. Claimdesk never takes it from the chain.</div>'
+      : a === r ? '<div class="bind match">The paperwork names the registered account. Clearing pays it now.</div>'
+      : '<div class="bind mismatch">The paperwork names a different account than the one registered with the link. The escrow will refuse — issue a new link instead.</div>'
+    ok.disabled = !a
+  }
+  addr.oninput = check; check()
   dlg.showModal()
-  return new Promise((ok) => dlg.addEventListener('close', () => ok(dlg.returnValue === 'ok' ? { paperwork: document.getElementById('dlgNote').value, withholdBps: Math.round(Number(document.getElementById('dlgBps').value || 0) * 100), taxAccount: document.getElementById('dlgTax').value.trim() } : null), { once: true }))
+  return new Promise((done) => dlg.addEventListener('close', () => done(dlg.returnValue === 'ok' ? { address: addr.value.trim(), note: document.getElementById('dlgNote').value, withholdBps: Math.round(Number(document.getElementById('dlgBps').value || 0) * 100) } : null), { once: true }))
 }
 async function clear(list) {
   const a = await ask(list)
-  if (!a || !a.paperwork.trim()) return
-  const r = await api('/api/clear', { method: 'POST', body: JSON.stringify({ items: list.map((x) => ({ ref: x.ref, expectedRecipient: x.registered ?? ZERO, ...a })) }) })
+  if (!a) return
+  const items = list.length === 1 ? [{ ref: list[0].ref, expectedRecipient: a.address, note: a.note, withholdBps: a.withholdBps }]
+    : list.map((x) => ({ ref: x.ref, expectedRecipient: x.paperwork.address, note: a.note, withholdBps: a.withholdBps }))
+  const r = await api('/api/clear', { method: 'POST', body: JSON.stringify({ items }) })
   const out = await r.json(); if (!r.ok) alert(out.error)
 }
 document.addEventListener('click', async (e) => {
@@ -93,6 +116,7 @@ document.addEventListener('click', async (e) => {
   if (b.id === 'export') { e.preventDefault(); const csv = await (await api('/api/links.csv')).text(); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'claim-links.csv'; a.click(); return }
   if (b.id === 'clearSel') { const refs = [...document.querySelectorAll('[data-sel]:checked')].map((c) => c.dataset.sel); if (refs.length) await clear(rows.filter((x) => refs.includes(x.ref))) }
   else if (b.dataset.clear) await clear(rows.filter((x) => x.ref === b.dataset.clear))
+  else if (b.dataset.bearer) { if (!confirm(`Open a bearer claim for ${b.dataset.bearer}? Whoever holds the link can then receive the award. Only do this if you delivered the link to the verified winner yourself.`)) return; const r = await api('/api/clear', { method: 'POST', body: JSON.stringify({ items: [{ ref: b.dataset.bearer, bearer: true, note: 'bearer claim opened by the organizer' }] }) }); const o = await r.json(); if (!r.ok) alert(o.error) }
   else if (b.dataset.revoke) { if (!confirm(`Revoke ${b.dataset.revoke}? The money returns to you now and the link stops working.`)) return; b.disabled = true; await api('/api/revoke', { method: 'POST', body: JSON.stringify({ ref: b.dataset.revoke }) }) }
   else if (b.dataset.reissue) { if (!confirm(`Issue a new link for ${b.dataset.reissue}? The old link and any account registered with it stop counting.`)) return; const r = await (await api('/api/reissue', { method: 'POST', body: JSON.stringify({ ref: b.dataset.reissue }) })).json(); prompt('New claim link — send it to the verified winner only:', r.link) }
   else if (b.dataset.verify) { const r = await (await api(`/api/verify?ref=${encodeURIComponent(b.dataset.verify)}`)).json(); alert(r.matches ? `On-chain hash matches your record from ${r.record.at}:\n\n${r.record.paperwork}` : 'No local record matches the on-chain hash.') ; return }

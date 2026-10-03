@@ -23,9 +23,9 @@ export interface EscrowGateway {
   /** Approve + fund every award in ONE Tempo transaction (batched calls). */
   fundMany(token: Hex, awards: NewAward[]): Promise<TxRef>
   /** `expectedRecipient` = the registered account the paperwork was checked for, or the zero address (bearer). */
-  clear(id: Hex, paperworkHash: Hex, expectedRecipient: Hex, withheld?: bigint, taxAccount?: Hex): Promise<TxRef>
+  clear(id: Hex, paperworkHash: Hex, expectedRecipient: Hex, withheld?: bigint): Promise<TxRef>
   /** Clear several awards in one transaction. */
-  clearMany(items: { id: Hex; paperworkHash: Hex; expectedRecipient: Hex; withheld?: bigint; taxAccount?: Hex }[]): Promise<TxRef>
+  clearMany(items: { id: Hex; paperworkHash: Hex; expectedRecipient: Hex; withheld?: bigint }[]): Promise<TxRef>
   reissueLink(id: Hex, newSigner: Hex): Promise<TxRef>
   revoke(id: Hex): Promise<TxRef>
   reclaim(id: Hex): Promise<TxRef>

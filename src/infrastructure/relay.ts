@@ -31,6 +31,7 @@ export const awardIdOf = (data: string) => ('0x' + data.replace(/^0x/, '').slice
 export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = []): boolean {
   const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
   if (calls.length !== 1) return false
+  if (tx.gas === undefined) return false // caps are mandatory, not optional
   const [c] = calls
   if (!c.to || !escrows.some((e) => isAddressEqual(e, c.to as Hex))) return false
   const data = (c.data ?? '').toLowerCase()
@@ -73,14 +74,28 @@ export function sponsorPolicy(
   return async (tx: SponsorRequest): Promise<boolean> => {
     if (!sponsorable(escrows, tx, opts.feeTokens) || !tx.from) return false
     const c = (tx.calls ?? [{ to: tx.to, data: tx.data }])[0]
-    if (opts.perAward && !opts.perAward(awardIdOf(c.data ?? ''))) return false
     try {
       await client.call({ account: tx.from as Hex, to: c.to as Hex, data: c.data as Hex }) // would it revert? then we don't pay
-      return true
     } catch {
       return false
     }
+    // only calls that would succeed count against the per-award budget, so junk calls cannot exhaust a winner's quota
+    return !opts.perAward || opts.perAward(awardIdOf(c.data ?? ''))
   }
+}
+
+/** JSON-RPC methods the public relay answers; everything else (and fee-payer signing without broadcast) is refused. */
+export const RELAY_METHODS = ['eth_chainId', 'eth_fillTransaction', 'eth_sendRawTransaction', 'eth_sendRawTransactionSync'] as const
+export function relayMethodAllowed(body: unknown): boolean {
+  const reqs = Array.isArray(body) ? body : [body]
+  return reqs.length > 0 && reqs.length <= 4 && reqs.every((r) => !!r && typeof r === 'object' && (RELAY_METHODS as readonly string[]).includes(String((r as { method?: unknown }).method)))
+}
+
+/** Client IP: the socket address, or the first X-Forwarded-For hop when (and only when) we sit behind our own proxy. */
+export function clientIp(socketAddress: string | undefined, forwardedFor: string | string[] | undefined, trustProxy: boolean): string {
+  const xff = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
+  if (trustProxy && xff) return xff.split(',')[0].trim()
+  return socketAddress ?? '?'
 }
 
 /** Relay that co-signs fees with a dedicated fee-payer key (never the organizer key) after `sponsorPolicy`. */

@@ -27,7 +27,13 @@ contract ClaimEscrow {
 
     /// @notice Shortest life an award can be funded with — a visible floor on how fast an organizer can take it back.
     uint64 public immutable minTtl;
+    /// @notice Where tax withheld at source goes, and the most that can ever be withheld — both fixed at deploy,
+    ///         so withholding cannot become a disguised redirect.
+    address public immutable taxAccount;
+    uint16 public immutable maxWithholdingBps;
     uint64 public constant MAX_TTL = 366 days;
+    /// @dev Tempo's TIP-20 tokens live at precompile addresses starting 0x20c0 — no look-alike token contracts.
+    bytes2 private constant TIP20_PREFIX = 0x20c0;
 
     address public organizer;
     address public pendingOrganizer;
@@ -61,9 +67,12 @@ contract ClaimEscrow {
         _;
     }
 
-    constructor(address organizer_, uint64 minTtl_) {
+    constructor(address organizer_, uint64 minTtl_, address taxAccount_, uint16 maxWithholdingBps_) {
+        if (maxWithholdingBps_ > 5_000 || (maxWithholdingBps_ > 0 && taxAccount_ == address(0))) revert InvalidWithholding();
         organizer = organizer_ == address(0) ? msg.sender : organizer_;
         minTtl = minTtl_;
+        taxAccount = taxAccount_;
+        maxWithholdingBps = maxWithholdingBps_;
         emit OrganizerChanged(address(0), organizer);
     }
 
@@ -73,7 +82,7 @@ contract ClaimEscrow {
     function fund(bytes32 id, address token, uint96 amount, uint64 expiresAt, address claimSigner) external onlyOrganizer {
         if (awards[id].status != Status.None) revert WrongState();
         if (
-            id == bytes32(0) || token == address(0) || amount == 0 || claimSigner == address(0)
+            id == bytes32(0) || bytes2(bytes20(token)) != TIP20_PREFIX || amount == 0 || claimSigner == address(0)
                 || expiresAt < block.timestamp + minTtl || expiresAt > block.timestamp + MAX_TTL
         ) revert InvalidAward();
         awards[id] = Award(token, amount, claimSigner, expiresAt, Status.Funded);
@@ -85,13 +94,14 @@ contract ClaimEscrow {
     /// @param paperworkHash hash of the organizer's paperwork record — the record stays off-chain.
     /// @param expectedRecipient the account the paperwork was checked against: the registered account (paid now),
     ///                          or zero when nobody registered (opens a bearer claim). Anything else reverts.
-    /// @param withheld tax withheld at source, sent to `taxAccount` now with the award memo (0 for none).
-    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld, address taxAccount) external onlyOrganizer {
+    /// @param withheld tax withheld at source (≤ maxWithholdingBps of the award), sent to the fixed `taxAccount` now
+    ///                 with the award memo (0 for none).
+    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld) external onlyOrganizer {
         Award storage a = _live(id);
         bool registered = a.status == Status.Registered;
         if (!registered && a.status != Status.Funded) revert WrongState();
         if (expectedRecipient != (registered ? a.party : address(0))) revert RecipientMismatch();
-        if (withheld >= a.amount || (withheld > 0 && taxAccount == address(0))) revert InvalidWithholding();
+        if (uint256(withheld) * 10_000 > uint256(a.amount) * maxWithholdingBps) revert InvalidWithholding();
         emit Cleared(id, paperworkHash, expectedRecipient, withheld, taxAccount);
         if (withheld > 0) {
             a.amount -= withheld;

@@ -16,13 +16,17 @@ contract ClaimEscrowTest is Test {
     bytes32 constant ID = bytes32("WF-2026-TEMPO-03");
     uint96 constant AMOUNT = 10_000e6;
     uint64 constant MIN_TTL = 7 days;
+    address constant TAX = address(0x1E5);
 
     event Claimed(bytes32 indexed id, address indexed recipient, uint256 amount, bytes32 memo);
     event Registered(bytes32 indexed id, address indexed recipient);
 
     function setUp() public {
-        token = new MockTIP20();
-        escrow = new ClaimEscrow(organizer, MIN_TTL);
+        // TIP-20s live at 0x20c0… precompile addresses on Tempo; put the mock's code there
+        MockTIP20 impl = new MockTIP20();
+        vm.etch(address(0x20C0000000000000000000000000000000000001), address(impl).code);
+        token = MockTIP20(address(0x20C0000000000000000000000000000000000001));
+        escrow = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000);
         claimSigner = vm.addr(claimPk);
         token.mint(organizer, 1_000_000e6);
         vm.prank(organizer);
@@ -50,7 +54,7 @@ contract ClaimEscrowTest is Test {
 
     function _clearFor(address expected) internal {
         vm.prank(organizer);
-        escrow.clear(ID, keccak256("w8ben+kyc"), expected, 0, address(0));
+        escrow.clear(ID, keccak256("w8ben+kyc"), expected, 0);
     }
 
     function _status() internal view returns (ClaimEscrow.Status) {
@@ -62,6 +66,13 @@ contract ClaimEscrowTest is Test {
         _fund(MIN_TTL);
         assertEq(token.balanceOf(address(escrow)), AMOUNT);
         assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Funded));
+    }
+
+    function test_fund_rejectsNonTip20Tokens() public {
+        MockTIP20 lookalike = new MockTIP20();
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.InvalidAward.selector);
+        escrow.fund(ID, address(lookalike), AMOUNT, uint64(block.timestamp + MIN_TTL), claimSigner);
     }
 
     function test_fund_rejectsDuplicatesAndBadInputs() public {
@@ -111,7 +122,7 @@ contract ClaimEscrowTest is Test {
         escrow.register(ID, forwardee, _regSig(forwardee)); // someone with the link got there first
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
-        escrow.clear(ID, keccak256("kyc for the real winner"), winner, 0, address(0));
+        escrow.clear(ID, keccak256("kyc for the real winner"), winner, 0);
         // organizer reissues the link: registration wiped, old key dead
         uint256 newPk = 0xBEEF;
         vm.prank(organizer);
@@ -137,26 +148,31 @@ contract ClaimEscrowTest is Test {
         assertEq(token.balanceOf(cold), AMOUNT);
     }
 
-    function test_clear_withholdsTaxAtSource() public {
+    function test_clear_withholdsTaxAtSource_toTheFixedTaxAccount() public {
         _fund(MIN_TTL);
         escrow.register(ID, winner, _regSig(winner));
-        address taxAccount = address(0x1E5);
-        uint96 tax = 3_000e6;
+        uint96 tax = 3_000e6; // exactly the 30% cap
         vm.prank(organizer);
-        escrow.clear(ID, keccak256("w8ben: no treaty"), winner, tax, taxAccount);
-        assertEq(token.balanceOf(taxAccount), tax);
+        escrow.clear(ID, keccak256("w8ben: no treaty"), winner, tax);
+        assertEq(token.balanceOf(TAX), tax);
         assertEq(token.balanceOf(winner), AMOUNT - tax);
         assertEq(token.balanceOf(address(escrow)), 0);
     }
 
-    function test_clear_invalidWithholding_reverts() public {
+    function test_withholdingAboveTheCap_reverts_cannotBecomeARedirect() public {
         _fund(MIN_TTL);
-        vm.startPrank(organizer);
+        vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
-        escrow.clear(ID, bytes32(0), address(0), 1, address(0));
+        escrow.clear(ID, bytes32(0), address(0), 3_000e6 + 1);
+    }
+
+    function test_deploy_rejectsUnsafeWithholdingSettings() public {
         vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
-        escrow.clear(ID, bytes32(0), address(0), AMOUNT, address(0x1E5));
-        vm.stopPrank();
+        new ClaimEscrow(organizer, MIN_TTL, TAX, 5_001);
+        vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
+        new ClaimEscrow(organizer, MIN_TTL, address(0), 100);
+        ClaimEscrow none = new ClaimEscrow(organizer, MIN_TTL, address(0), 0); // no withholding at all is fine
+        assertEq(none.maxWithholdingBps(), 0);
     }
 
     function test_register_forgedOrCrossPurposeSignature_reverts() public {
@@ -191,11 +207,11 @@ contract ClaimEscrowTest is Test {
         _fund(MIN_TTL);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
-        escrow.clear(ID, bytes32(0), winner, 0, address(0));
+        escrow.clear(ID, bytes32(0), winner, 0);
     }
 
     function test_pathB_redirect_highS_wrongLength_otherEscrow_revert() public {
-        ClaimEscrow other = new ClaimEscrow(organizer, MIN_TTL);
+        ClaimEscrow other = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000);
         _fund(MIN_TTL);
         _clearFor(address(0));
         bytes memory sig = _claimSig(winner);
@@ -235,7 +251,7 @@ contract ClaimEscrowTest is Test {
         assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Revoked));
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.WrongState.selector);
-        escrow.clear(ID, bytes32(0), winner, 0, address(0));
+        escrow.clear(ID, bytes32(0), winner, 0);
     }
 
     // ---- expiry
@@ -264,7 +280,7 @@ contract ClaimEscrowTest is Test {
         vm.warp(block.timestamp + MIN_TTL);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.Expired.selector);
-        escrow.clear(ID, bytes32(0), address(0), 0, address(0));
+        escrow.clear(ID, bytes32(0), address(0), 0);
     }
 
     // ---- roles
@@ -273,7 +289,7 @@ contract ClaimEscrowTest is Test {
         escrow.fund(ID, address(token), AMOUNT, uint64(block.timestamp + MIN_TTL), claimSigner);
         _fund(MIN_TTL);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
-        escrow.clear(ID, bytes32(0), address(0), 0, address(0));
+        escrow.clear(ID, bytes32(0), address(0), 0);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
         escrow.revoke(ID);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
@@ -301,8 +317,8 @@ contract ClaimEscrowTest is Test {
     // ---- invariant (fuzz): every funded dollar ends in exactly one place, and the escrow ends empty
     function testFuzz_conservation(uint96 amount, uint8 path, uint96 taxBps) public {
         amount = uint96(bound(amount, 2, 1_000_000e6));
-        uint96 tax = uint96((uint256(amount) * bound(taxBps, 0, 9_000)) / 10_000);
-        address taxAccount = address(0x1E5);
+        uint96 tax = uint96((uint256(amount) * bound(taxBps, 0, 3_000)) / 10_000);
+        address taxAccount = TAX;
         vm.prank(organizer);
         escrow.fund(ID, address(token), amount, uint64(block.timestamp + MIN_TTL), claimSigner);
         uint256 total = token.balanceOf(organizer) + token.balanceOf(address(escrow));
@@ -310,10 +326,10 @@ contract ClaimEscrowTest is Test {
         if (p == 0) {
             escrow.register(ID, winner, _regSig(winner));
             vm.prank(organizer);
-            escrow.clear(ID, bytes32(0), winner, tax, tax > 0 ? taxAccount : address(0));
+            escrow.clear(ID, bytes32(0), winner, tax);
         } else if (p == 1) {
             vm.prank(organizer);
-            escrow.clear(ID, bytes32(0), address(0), tax, tax > 0 ? taxAccount : address(0));
+            escrow.clear(ID, bytes32(0), address(0), tax);
             escrow.claim(ID, winner, _claimSig(winner));
         } else if (p == 2) {
             vm.prank(organizer);
