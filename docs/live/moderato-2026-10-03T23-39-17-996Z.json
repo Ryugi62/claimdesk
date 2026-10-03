@@ -1,0 +1,167 @@
+{
+  "chainId": 42431,
+  "explorer": "https://explore.testnet.tempo.xyz",
+  "escrow": "0xe015242a566e4ba6cd706ffb8fb514dfe0c97b49",
+  "log": [
+    {
+      "step": "keys",
+      "organizer": "0x45632a6cD407240e1E789297070EF989F80cC5dA",
+      "feePayer": "0x5434a20Ff8850729821cd03792E3faE9b99D562f"
+    },
+    {
+      "step": "deploy",
+      "escrow": "0xe015242a566e4ba6cd706ffb8fb514dfe0c97b49",
+      "minTtlSeconds": 60,
+      "note": "test escrow: 60 s expiry floor and 20 s reissue notice so every path runs inside this script; CLI defaults are 14 days and 48 hours",
+      "taxAccount": "0x295f5e252847C6C416a8e7f3511acAbe6d2fDFAE",
+      "maxWithholdingBps": 3000,
+      "tx": "0x6e6a77017809393994de79b9a8a16a37fd75b8aae1a4e9aca795086c9adf997d",
+      "link": "https://explore.testnet.tempo.xyz/address/0xe015242a566e4ba6cd706ffb8fb514dfe0c97b49"
+    },
+    {
+      "step": "fund-batch",
+      "awards": 6,
+      "tx": "0x3f39309e1feb0e10ebee7397c96b76abd470f1229ab7a7ad078d680b3a3da04f",
+      "gasUsed": "3399696",
+      "gasPerAward": "566616",
+      "shortExpiryTx": "0x92be26952eded50b17454e2101328b494b179144b3e247adecfa2b5d62f92d6e"
+    },
+    {
+      "step": "A-register-then-clear",
+      "registerTx": "0xe691cfb622a581fd356cb0e464e107ae6ba349fb8ebb8c8563a6516caa0e42c6",
+      "clearTx": "0xc750dd110a5b6a86169472efb5ffe600c25e1ba6b9edd62fa35043fa48472a19",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xc750dd110a5b6a86169472efb5ffe600c25e1ba6b9edd62fa35043fa48472a19",
+      "winnerAfter": "25000000"
+    },
+    {
+      "step": "A-link-reused-after-registration",
+      "tx": "0x1df08145db20f491294871d5c91a5ca8fbb15eec7a9aa01437865f9b8596f525",
+      "status": "reverted",
+      "error": "WrongState",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x1df08145db20f491294871d5c91a5ca8fbb15eec7a9aa01437865f9b8596f525"
+    },
+    {
+      "step": "F-clear-for-real-winner-refused",
+      "tx": "0xe0ab4a36ed2e6b275695ab9885bc980b83c616c9ce21cb7d4f71d300f6c6de1b",
+      "status": "reverted",
+      "error": "RecipientMismatch",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xe0ab4a36ed2e6b275695ab9885bc980b83c616c9ce21cb7d4f71d300f6c6de1b"
+    },
+    {
+      "step": "F-reissue-scheduled",
+      "tx": "0xe6f11f27b1b2eb943489012c916fc6f565410471bc9e2f3a5f5fd03ddaf0eb37",
+      "statusAfter": "Registered"
+    },
+    {
+      "step": "F-old-link-refused",
+      "tx": "0x0bc222f6c598470a28f7c11df1c47f0427dd54233d4bb69a83a6a16623021ec7",
+      "status": "reverted",
+      "error": "BadClaimSignature",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x0bc222f6c598470a28f7c11df1c47f0427dd54233d4bb69a83a6a16623021ec7"
+    },
+    {
+      "step": "F-reissued-and-paid",
+      "reissueTx": "0xc69c85dd1eecbc0c06c082adbd33b25f3ddeefd3fb29060344baeaa244e08aab",
+      "registerTx": "0x69bdc8030b8721ed45d9dd27762be10af1fd29c84901ebcbede40388565abc7a",
+      "clearTx": "0xaf7e4e466ae0b073470688b43bf5ea0668dbca0c9720afe9413af8f7450625a8",
+      "winnerAfter": "20000000",
+      "thiefAfter": "0"
+    },
+    {
+      "step": "G-withholding-above-cap-refused",
+      "tx": "0x3e07109dfa4aba9ca9a8276d270e1edf8202a2297384c3e0efbf6a7290da11e5",
+      "status": "reverted",
+      "error": "InvalidWithholding",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x3e07109dfa4aba9ca9a8276d270e1edf8202a2297384c3e0efbf6a7290da11e5"
+    },
+    {
+      "step": "G-withholding",
+      "clearTx": "0x1803c1c5af1c20c2e70d3a054b8f64664b6a2f797b8db9134e152e9c14091dbd",
+      "winnerAfter": "70000000",
+      "taxAccountAfter": "30000000"
+    },
+    {
+      "step": "B-claim-before-clearance-refused",
+      "tx": "0xbc598a6d7e49e4c51118385f192d2a5f3a9b6b73153b3b41cd9cbd3063d0659d",
+      "status": "reverted",
+      "error": "WrongState",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xbc598a6d7e49e4c51118385f192d2a5f3a9b6b73153b3b41cd9cbd3063d0659d"
+    },
+    {
+      "step": "B-bearer-claim-paid",
+      "tx": "0xcee8064ea5e3b55874ab2eb0b89a66fb4bb4f4282412beab839cc5318021a6c2",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xcee8064ea5e3b55874ab2eb0b89a66fb4bb4f4282412beab839cc5318021a6c2",
+      "seconds": 1.47,
+      "winnerAfter": "15000000"
+    },
+    {
+      "step": "B-claim-twice-refused",
+      "tx": "0x382885621466867801b4f9be1dd3064a7e06c92d02015681dfd2286638fd322c",
+      "status": "reverted",
+      "error": "WrongState",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x382885621466867801b4f9be1dd3064a7e06c92d02015681dfd2286638fd322c"
+    },
+    {
+      "step": "E-redirect-refused",
+      "tx": "0x0ac8daad6549e9d29d19cef02fbf7c8dd37c63863a52b776114785b9cd7b9356",
+      "status": "reverted",
+      "error": "BadClaimSignature",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x0ac8daad6549e9d29d19cef02fbf7c8dd37c63863a52b776114785b9cd7b9356"
+    },
+    {
+      "step": "C-revoke",
+      "tx": "0x6f82f0b976d531ce8c2f4c9b5f77d08595ef5af8566011f042e185b7ba7573de",
+      "organizerDelta": "9999972"
+    },
+    {
+      "step": "C-register-after-revoke-refused",
+      "tx": "0xe59e52c80e284f3d8a964ecbb16ce99cd120f865cd16541ee43ce63334c4c2b7",
+      "status": "reverted",
+      "error": "WrongState",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xe59e52c80e284f3d8a964ecbb16ce99cd120f865cd16541ee43ce63334c4c2b7"
+    },
+    {
+      "step": "D-claim-after-expiry-refused",
+      "tx": "0x61af3e45845692573f2225d6de190df3d5404e013d37f86b3cc02bfd42ce9c55",
+      "status": "reverted",
+      "error": "Expired",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x61af3e45845692573f2225d6de190df3d5404e013d37f86b3cc02bfd42ce9c55"
+    },
+    {
+      "step": "D-reclaim",
+      "tx": "0x8f0d77b8b4b91c6242af3e2f4625b1a5de0f91867c6b00c93504842ba9281e54"
+    },
+    {
+      "step": "status-board",
+      "WF-E2E-A": "Claimed",
+      "WF-E2E-F": "Claimed",
+      "WF-E2E-G": "Claimed",
+      "WF-E2E-B": "Claimed",
+      "WF-E2E-E": "Cleared",
+      "WF-E2E-C": "Revoked",
+      "WF-E2E-D": "Reclaimed"
+    },
+    {
+      "step": "receipt-G",
+      "ref": "WF-E2E-G",
+      "amountText": "70.00",
+      "symbol": "pathUSD",
+      "txHash": "0x1803c1c5af1c20c2e70d3a054b8f64664b6a2f797b8db9134e152e9c14091dbd",
+      "blockTimeUtc": "2026-10-03T23:38:44.000Z",
+      "memo": "0x57462d4532452d47000000000000000000000000000000000000000000000000",
+      "memoText": "WF-E2E-G",
+      "recipient": "0x4D6064114632d1f09EEb155C119c0Df68f9379CC",
+      "withholding": {
+        "grossText": "100.00",
+        "withheldText": "30.00"
+      },
+      "local": {
+        "currency": "KRW",
+        "rate": 1348.28,
+        "rateDate": "2026-10-02",
+        "source": "ECB euro foreign exchange reference rates (via frankfurter.dev)",
+        "amountText": "94,380"
+      }
+    }
+  ]
+}
