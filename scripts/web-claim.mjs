@@ -1,10 +1,13 @@
 // Drives the winner pages in Chromium with a virtual WebAuthn authenticator (a real passkey ceremony, no human),
 // against the organizer server (npm run serve). Writes screenshots to docs/ui and a log to docs/live/web-<ts>.json.
-//   node scripts/web-claim.mjs <batches/*.links.json> <REF registers early> <REF already cleared>
+//   node scripts/web-claim.mjs <batches/*.links.json> <REF registers early> <REF already cleared> <console URL with #token=…>
 import { chromium } from 'playwright'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
-const [linksFile, earlyRef, clearedRef] = process.argv.slice(2)
+const [linksFile, earlyRef, clearedRef, consoleUrl] = process.argv.slice(2)
+const CONSOLE = new URL(consoleUrl).origin
+const TOKEN = new URLSearchParams(new URL(consoleUrl).hash.slice(1)).get('token')
+const consoleApi = (path, body) => fetch(`${CONSOLE}${path}`, { method: body ? 'POST' : 'GET', headers: { 'content-type': 'application/json', 'x-console-token': TOKEN }, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json())
 const links = Object.fromEntries(JSON.parse(readFileSync(linksFile, 'utf8')).map((r) => [r.ref, r.link]))
 const BASE = new URL(links[earlyRef]).origin
 mkdirSync('docs/ui', { recursive: true })
@@ -19,6 +22,7 @@ async function phone() {
   await cdp.send('WebAuthn.enable')
   await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } })
   page.on('pageerror', (e) => console.log('[pageerror]', e.message))
+  page.on('dialog', (d) => d.accept())
   return { ctx, page }
 }
 
@@ -30,11 +34,14 @@ async function phone() {
   await page.screenshot({ path: 'docs/ui/1-link-opened-390.png' })
   let t0 = Date.now()
   await page.click('#cta')
-  await page.waitForSelector('.addr', { timeout: 60000 })
-  const address = (await page.textContent('.addr')).trim()
-  note('registered', { ref: earlyRef, seconds: (Date.now() - t0) / 1000, account: address })
+  await page.waitForSelector('#registered', { timeout: 60000 })
+  const address = (await page.textContent('#registered')).trim()
+  const regTx = await page.getAttribute('#regtx', 'href').catch(() => null)
+  note('registered-with-passkey', { ref: earlyRef, seconds: (Date.now() - t0) / 1000, account: address, tx: regTx })
   await page.screenshot({ path: 'docs/ui/2-account-ready-390.png' })
-  const clr = await (await fetch(`${BASE}/api/clear`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref: earlyRef, paperwork: 'W-8BEN received, identity checked, prize acceptance signed' }) })).json()
+  const wrong = await consoleApi('/api/clear', { items: [{ ref: earlyRef, paperwork: 'checked for a different address', expectedRecipient: '0x000000000000000000000000000000000000bEEF' }] })
+  note('organizer-clear-for-wrong-address-refused', { error: wrong.error ?? null })
+  const clr = await consoleApi('/api/clear', { items: [{ ref: earlyRef, paperwork: 'W-8BEN signed 2026-10-06; identity check passed; address confirmed by the winner', expectedRecipient: address }] })
   note('organizer-cleared', { ref: earlyRef, tx: clr.tx })
   await page.reload()
   await page.waitForSelector('text=Received', { timeout: 60000 })
@@ -51,8 +58,8 @@ async function phone() {
   await page.fill('#memo', 'DEPOSIT-TAG-1234')
   t0 = Date.now()
   await page.click('#cta')
-  await page.waitForSelector('text=Sent', { timeout: 60000 })
-  note('sent-from-account', { seconds: (Date.now() - t0) / 1000, tx: await page.getAttribute('.chip a', 'href'), balanceAfter: await page.textContent('.amount') })
+  await page.waitForSelector('#sent', { timeout: 60000 })
+  note('sent-from-account', { seconds: (Date.now() - t0) / 1000, summary: (await page.textContent('#sent')).trim(), tx: await page.getAttribute('#sent a', 'href'), balanceAfter: await page.textContent('.amount') })
   await page.screenshot({ path: 'docs/ui/5-sent-390.png' })
   await ctx.close()
 }
@@ -60,6 +67,7 @@ async function phone() {
 // path B — a winner who never opened the link before clearance: receive now with a new passkey
 {
   const { ctx, page } = await phone()
+  await consoleApi('/api/clear', { items: [{ ref: clearedRef, paperwork: 'W-8BEN signed; bearer link sent to the verified winner', expectedRecipient: '0x0000000000000000000000000000000000000000' }] })
   await page.goto(links[clearedRef])
   await page.waitForSelector('.chip')
   const t0 = Date.now()
@@ -69,14 +77,17 @@ async function phone() {
   await ctx.close()
 }
 
-// organizer console
+// organizer console (token in the fragment, as printed at start)
 for (const [w, h] of [[1280, 800], [390, 844]]) {
   const page = await browser.newPage({ viewport: { width: w, height: h } })
-  await page.goto(`${BASE}/`)
-  await page.waitForSelector('tbody tr')
-  note(`console-${w}`, { horizontalOverflow: await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth) })
-  await page.screenshot({ path: `docs/ui/organizer-console-${w}.png` })
+  await page.goto(consoleUrl)
+  await page.waitForSelector('.row')
+  const clipped = await page.evaluate(() => [...document.querySelectorAll('.row, .row *')].some((el) => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible'))
+  note(`console-${w}`, { horizontalOverflow: await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), clippedContent: clipped })
+  await page.screenshot({ path: `docs/ui/organizer-console-${w}.png`, fullPage: true })
 }
+const outsider = await fetch(`${CONSOLE}/api/status`, { headers: { host: 'evil.example' } }).then((r) => r.status)
+note('console-without-token', { status: await fetch(`${CONSOLE}/api/status`).then((r) => r.status), outsiderHostStatus: outsider })
 await browser.close()
 mkdirSync('docs/live', { recursive: true })
 const file = `docs/live/web-${new Date().toISOString().replace(/[:.]/g, '-')}.json`

@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { privateKeyToAccount } from 'viem/accounts'
-import { tempoClient, TempoEscrow, viemClaimKeys, ZERO } from '../adapters/tempoEscrow'
+import { tempoClient, TempoEscrow, viemClaimKeys, ZERO, explainRevert } from '../adapters/tempoEscrow'
 import { statusBoard } from '../application/payouts'
 import { memoToRef, awardMemo } from '../domain/memo'
 import { describe } from '../domain/status'
@@ -88,7 +88,7 @@ createServer(async (req, res) => {
     }
     json(res, 404, { error: 'unknown endpoint' })
   } catch (e) {
-    json(res, 500, { error: (e as Error).message.split('\n')[0] })
+    json(res, 500, { error: explainRevert(e) })
   }
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`organizer console: http://localhost:${PORT}/#token=${TOKEN}   (organizer ${organizer.address}, escrow ${ESCROW}, pid ${process.pid})`)

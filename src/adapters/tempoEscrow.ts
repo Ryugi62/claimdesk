@@ -1,4 +1,4 @@
-import { createClient, custom, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
+import { createClient, custom, decodeErrorResult, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoActions } from 'viem/tempo'
 import { claimEscrowAbi, claimEscrowBytecode } from './claimEscrowArtifact'
@@ -200,6 +200,17 @@ export class TempoWinner implements WinnerGateway {
   }
   register(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('register', a) }
   claim(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('claim', a) }
+}
+
+/** The escrow's custom error name inside a viem error (e.g. "RecipientMismatch"), else the first line of the message. */
+export function explainRevert(e: unknown): string {
+  const raw = (e as { walk?: (f: (x: unknown) => boolean) => { data?: unknown } | undefined }).walk?.((x) => typeof (x as { data?: unknown }).data === 'string' && String((x as { data: string }).data).startsWith('0x'))?.data
+  if (typeof raw === 'string') {
+    try {
+      return decodeErrorResult({ abi: claimEscrowAbi, data: raw as Hex }).errorName
+    } catch { /* not ours */ }
+  }
+  return String((e as Error).message ?? e).split('\n')[0]
 }
 
 export { claimEscrowAbi }

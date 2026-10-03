@@ -2,7 +2,7 @@ import { http, type Chain } from 'viem'
 import { tempoModerato, tempo } from 'viem/chains'
 import { Account, WebAuthnP256, withRelay } from 'viem/tempo'
 import { WebAuthnP256 as OxWebAuthn, P256, Hash, Bytes, Hex as OxHex, PublicKey } from 'ox'
-import { tempoClient } from '../src/adapters/tempoEscrow'
+import { tempoClient, resilientHttp } from '../src/adapters/tempoEscrow'
 import { formatUnits } from '../src/domain/receipt'
 import type { Hex } from '../src/application/ports'
 
@@ -26,18 +26,18 @@ export async function loadConfig(): Promise<Config> {
 export const chainFor = (id: number): Chain => (id === tempo.id ? tempo : tempoModerato)
 
 export function readClient(cfg: Config) {
-  return tempoClient(chainFor(cfg.chainId), undefined, http(cfg.rpc))
+  return tempoClient(chainFor(cfg.chainId), undefined, resilientHttp(cfg.rpc))
 }
 
 /** Client whose transactions are fee-sponsored (the sender needs no balance). */
 export function sponsoredClient(cfg: Config, account: ReturnType<typeof Account.fromWebAuthnP256> | ReturnType<typeof Account.fromSecp256k1>) {
   const sponsor = cfg.sponsor.startsWith('http') ? cfg.sponsor : new URL(cfg.sponsor, location.href).toString()
-  return tempoClient(chainFor(cfg.chainId), account as never, withRelay(http(cfg.rpc), http(sponsor)) as never)
+  return tempoClient(chainFor(cfg.chainId), account as never, withRelay(resilientHttp(cfg.rpc), http(sponsor)) as never)
 }
 
 /** Client that pays its own fee in the stablecoin it holds (Tempo has no gas token). */
 export function selfPayClient(cfg: Config, account: ReturnType<typeof Account.fromWebAuthnP256>) {
-  return tempoClient(chainFor(cfg.chainId), account as never, http(cfg.rpc))
+  return tempoClient(chainFor(cfg.chainId), account as never, resilientHttp(cfg.rpc))
 }
 
 // ---------------------------------------------------------------- passkeys

@@ -1,0 +1,58 @@
+{
+  "base": "http://localhost:5174",
+  "authenticator": "Chromium virtual WebAuthn authenticator (CTAP2, internal, user-verified)",
+  "log": [
+    {
+      "step": "registered-with-passkey",
+      "ref": "WF-2026-STANDOUT-07",
+      "seconds": 3.399,
+      "account": "0x846aAa3024e0f06A4a0B24151B9FCc57dcF38632",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0xbc2906273f9d2403b044c703589f78dd2ef043b416397a2af87d878d7348b3d2"
+    },
+    {
+      "step": "organizer-clear-for-wrong-address-refused",
+      "error": "Execution reverted for an unknown reason."
+    },
+    {
+      "step": "organizer-cleared",
+      "ref": "WF-2026-STANDOUT-07",
+      "tx": "0x8e1cbfb905add72b504505540ec106a4fb908377bc233f19e9123ee91d3d1f3d"
+    },
+    {
+      "step": "receipt",
+      "amount": "$15,000.00",
+      "local": "≈ 20,224,200 KRW",
+      "pdf": "docs/ui/receipt-sample.pdf",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x8e1cbfb905add72b504505540ec106a4fb908377bc233f19e9123ee91d3d1f3d"
+    },
+    {
+      "step": "sent-from-account",
+      "seconds": 1.828,
+      "summary": "Sent $12.50 to 0x0000…dEaD · tag DEPOSIT-TAG-1234 · view",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0xb0abb515dc31aedb15110557e907b96ac8dcfa2cbe3d5b99b6b0937ed03bd6fd",
+      "balanceAfter": "$14,987.50"
+    },
+    {
+      "step": "bearer-claim",
+      "ref": "WF-2026-PUBLICGOOD",
+      "seconds": 3.872,
+      "unit": "PathUSD received in 2.4 s · network fee paid by the organizer",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x2f57aa4208a832e26edee575f01262603eb3dc81afa11fc6db4a0628119a68ce"
+    },
+    {
+      "step": "console-1280",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-390",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-without-token",
+      "status": 403,
+      "outsiderHostStatus": 403
+    }
+  ]
+}
