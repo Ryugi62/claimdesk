@@ -71,7 +71,7 @@ async function load() {
   document.getElementById('rows').innerHTML = rows.map((x) => {
     const short = (a) => a.slice(0, 8) + '…' + a.slice(-6)
     const acct = x.recipient ? `paid → <a href="${explorer}/tx/${x.txs.Claimed}" target="_blank" rel="noopener">${esc(short(x.recipient))}</a>` : x.registered ? `registered ${esc(short(x.registered))}` : 'no account yet'
-    const pw = x.status === 'Claimed' || x.status === 'Revoked' || x.status === 'Reclaimed' ? '' : x.paperwork ? `<div class="pw">paperwork: ${esc(x.paperwork.legalName)} (${esc(x.paperwork.taxCountry)}) for ${esc(short(x.paperwork.address))} — <b>${x.binding === 'match' ? 'matches the registered account' : x.binding === 'mismatch' ? 'DOES NOT match the registered account — issue a new link' : 'no account registered yet'}</b></div>` : '<div class="pw">paperwork: not received</div>'
+    const pw = x.status === 'Claimed' || x.status === 'Revoked' || x.status === 'Reclaimed' ? '' : (x.paperwork ? `<div class="pw">signed paperwork: ${esc(x.paperwork.legalName)} (${esc(x.paperwork.taxCountry)}) for ${esc(short(x.paperwork.address))} — <b>${x.binding === 'match' ? 'matches the registered account' : x.binding === 'mismatch' ? 'DOES NOT match the registered account — issue a new link' : 'no account registered yet'}</b>${x.conflicts ? ` · ${x.conflicts} other submission(s) for other accounts — check identities` : ''}</div>` : '<div class="pw">paperwork: not received</div>') + (x.reissueAt ? `<div class="pw">new link scheduled — can be issued after ${esc(new Date(x.reissueAt * 1000).toLocaleString())}</div>` : '')
     const canClear = x.status === 'Registered'
     const sel = x.status === 'Registered' && x.binding === 'match' ? `<input type="checkbox" data-sel="${esc(x.ref)}" aria-label="select ${esc(x.ref)}" style="width:auto;height:auto;display:inline;margin:0 6px 0 0">` : ''
     const act = canClear ? `<button data-clear="${esc(x.ref)}">Clear &amp; pay</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
@@ -119,7 +119,13 @@ document.addEventListener('click', async (e) => {
   else if (b.dataset.clear) await clear(rows.filter((x) => x.ref === b.dataset.clear))
   else if (b.dataset.bearer) { if (!confirm(`Open a bearer claim for ${b.dataset.bearer}? Whoever holds the link can then receive the award. Only do this if you delivered the link to the verified winner yourself.`)) return; const r = await api('/api/clear', { method: 'POST', body: JSON.stringify({ items: [{ ref: b.dataset.bearer, bearer: true, note: 'bearer claim opened by the organizer' }] }) }); const o = await r.json(); if (!r.ok) alert(o.error) }
   else if (b.dataset.revoke) { if (!confirm(`Revoke ${b.dataset.revoke}? The money returns to you now and the link stops working.`)) return; b.disabled = true; await api('/api/revoke', { method: 'POST', body: JSON.stringify({ ref: b.dataset.revoke }) }) }
-  else if (b.dataset.reissue) { if (!confirm(`Issue a new link for ${b.dataset.reissue}? The old link and any account registered with it stop counting.`)) return; const r = await (await api('/api/reissue', { method: 'POST', body: JSON.stringify({ ref: b.dataset.reissue }) })).json(); prompt('New claim link — send it to the verified winner only:', r.link) }
+  else if (b.dataset.reissue) {
+    if (!confirm(`Issue a new link for ${b.dataset.reissue}? If an account is registered, it gets public notice first and the new link takes effect after the escrow's notice period.`)) return
+    const r = await (await api('/api/reissue', { method: 'POST', body: JSON.stringify({ ref: b.dataset.reissue }) })).json()
+    if (r.error) alert(r.error)
+    else if (r.scheduled) alert(`Scheduled. The registered account sees the notice now; press "New link" again after ${new Date(r.notBefore * 1000).toLocaleString()} to issue it.`)
+    else prompt('New claim link — send it to the verified winner only:', r.link)
+  }
   else if (b.dataset.verify) { const r = await (await api(`/api/verify?ref=${encodeURIComponent(b.dataset.verify)}`)).json(); alert(r.matches ? `On-chain hash matches your record from ${r.record.at}:\n\n${r.record.paperwork}` : 'No local record matches the on-chain hash.') ; return }
   else return
   await load()

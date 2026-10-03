@@ -18,28 +18,11 @@
     <label>Full legal name<input id="legalName" autocomplete="name" required></label>
     <label>Tax residence (2-letter country code)<input id="taxCountry" maxlength="2" placeholder="KR" required></label>
     <label>Sign: type your full legal name again<input id="formSignedAs" required></label>
-    <p class="hint">By signing you certify the details above, as on a W-8BEN. A real provider would also verify your identity document here.</p>
+    <p class="hint">By signing you certify the details above, as on a W-8BEN. Your passkey signs this form for this account, so nobody else can file paperwork for it. A real provider would also verify your identity document here.</p>
   </form>
   <p id="msg"></p>
 </main>
-<div class="cta"><button id="cta">Submit paperwork</button></div>
-<script type="module">
-const q = new URLSearchParams(location.search)
-for (const k of ['ref', 'address']) document.getElementById(k).value = q.get(k) ?? ''
-const cta = document.getElementById('cta'), msg = document.getElementById('msg')
-cta.onclick = async () => {
-  const body = Object.fromEntries(['ref', 'address', 'legalName', 'taxCountry', 'formSignedAs'].map((k) => [k, document.getElementById(k).value]))
-  cta.disabled = true
-  const r = await fetch('api/paperwork', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  const out = await r.json()
-  if (!r.ok) { cta.disabled = false; msg.className = 'err'; msg.textContent = out.error; return }
-  msg.className = ''
-  document.getElementById('f').remove()
-  msg.innerHTML = '<span class="chip ok">Paperwork sent</span><p>Your organizer will approve it for your account and you will be paid automatically. You can close this page.</p>'
-  cta.textContent = 'Back to my award'
-  cta.disabled = false
-  cta.onclick = () => history.back()
-}
-</script>
+<div class="cta"><button id="cta">Sign and submit paperwork</button></div>
+<script type="module" src="paperwork.js"></script>
 </body>
 </html>

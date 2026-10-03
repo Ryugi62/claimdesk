@@ -1,30 +1,34 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { isAddress } from 'viem'
+import { paperworkRecordHash } from '../adapters/tempoEscrow'
 
 /**
- * Stand-in for a KYC / tax-form provider: the winner's paperwork submission, including the payout address it was
- * made for, lands in an owner-only inbox on the organizer's machine. The console takes the expected recipient for
- * clear() from HERE — never from chain state — so a forwarded link that registered first shows up as a mismatch.
+ * Stand-in for a KYC / tax-form provider. A submission is accepted only with a signature from the payout account it
+ * names (passkey or any Tempo account, verified by Tempo's signature-verifier precompile), so nobody can file
+ * paperwork for an account they do not control. Every submission is kept; the console shows conflicts.
  */
 export const INBOX = 'paperwork/inbox.jsonl'
 
-export interface Submission {
+export interface SubmissionFields {
   ref: string
   address: string
   legalName: string
   taxCountry: string
   formSignedAs: string
+}
+export interface Submission extends SubmissionFields {
   at: string
+  signature: string
+  verified: true
 }
 
-export function validateSubmission(x: Partial<Submission>): Submission {
+export function validateFields(x: Partial<SubmissionFields>): SubmissionFields {
   const s = {
     ref: String(x.ref ?? '').trim(),
     address: String(x.address ?? '').trim(),
     legalName: String(x.legalName ?? '').trim(),
     taxCountry: String(x.taxCountry ?? '').trim().toUpperCase(),
     formSignedAs: String(x.formSignedAs ?? '').trim(),
-    at: new Date().toISOString(),
   }
   if (!s.ref || s.ref.length > 31) throw new Error('missing award reference')
   if (!isAddress(s.address)) throw new Error('payout address is not a valid address')
@@ -34,28 +38,52 @@ export function validateSubmission(x: Partial<Submission>): Submission {
   return s
 }
 
-export function submit(x: Partial<Submission>, file = INBOX): Submission {
-  const s = validateSubmission(x)
+/** Hash of the form contents the account signs (canonical field order). */
+export const recordHash = (f: SubmissionFields) => paperworkRecordHash(f)
+
+/** Accepts a submission only if `recoverSigner(digest)` is the payout account it names. */
+export async function submit(
+  x: Partial<SubmissionFields> & { signature?: string },
+  digestFor: (f: SubmissionFields) => `0x${string}`,
+  recoverSigner: (digest: `0x${string}`, signature: `0x${string}`) => Promise<string>,
+  file = INBOX,
+): Promise<Submission> {
+  const f = validateFields(x)
+  const signature = String(x.signature ?? '')
+  if (!/^0x[0-9a-fA-F]+$/.test(signature)) throw new Error('missing signature from your account')
+  let signer = ''
+  try {
+    signer = await recoverSigner(digestFor(f), signature as `0x${string}`)
+  } catch {
+    signer = ''
+  }
+  if (signer.toLowerCase() !== f.address.toLowerCase()) throw new Error('the signature is not from the payout account named in the form')
+  const s: Submission = { ...f, at: new Date().toISOString(), signature, verified: true }
   mkdirSync(file.replace(/\/[^/]*$/, ''), { recursive: true })
   appendFileSync(file, JSON.stringify(s) + '\n')
   chmodSync(file, 0o600)
   return s
 }
 
-/** Latest submission per award reference. */
-export function latestSubmissions(file = INBOX): Record<string, Submission> {
+/** All verified submissions per award reference, oldest first. */
+export function submissionsByRef(file = INBOX): Record<string, Submission[]> {
   if (!existsSync(file)) return {}
-  const out: Record<string, Submission> = {}
+  const out: Record<string, Submission[]> = {}
   for (const l of readFileSync(file, 'utf8').split('\n').filter(Boolean)) {
     const s = JSON.parse(l) as Submission
-    out[s.ref] = s
+    if (s.verified) (out[s.ref] ??= []).push(s)
   }
   return out
 }
 
-/** What the organizer should see before clearing. */
-export function bindingCheck(registered: string | undefined, submitted: string | undefined): 'match' | 'mismatch' | 'no-paperwork' | 'not-registered' {
-  if (!submitted) return 'no-paperwork'
-  if (!registered) return 'not-registered'
-  return registered.toLowerCase() === submitted.toLowerCase() ? 'match' : 'mismatch'
+export type Binding = 'match' | 'mismatch' | 'no-paperwork' | 'not-registered'
+
+/** Is there signed paperwork for the registered account? Other accounts' paperwork for the same award = conflict. */
+export function bindingCheck(registered: string | undefined, subs: Submission[] | undefined): { binding: Binding; forRegistered?: Submission; others: Submission[] } {
+  const list = subs ?? []
+  if (list.length === 0) return { binding: 'no-paperwork', others: [] }
+  if (!registered) return { binding: 'not-registered', others: list }
+  const mine = [...list].reverse().find((s) => s.address.toLowerCase() === registered.toLowerCase())
+  const others = list.filter((s) => s.address.toLowerCase() !== registered.toLowerCase())
+  return mine ? { binding: 'match', forRegistered: mine, others } : { binding: 'mismatch', others }
 }

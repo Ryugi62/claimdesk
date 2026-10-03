@@ -71,8 +71,8 @@ async function main() {
   record('keys', { organizer: organizer.address, feePayer: feePayer.address })
 
   const taxAccount = privateKeyToAccount(generatePrivateKey())
-  const dep = await deployEscrow(org, { minTtlSeconds: 60, taxAccount: taxAccount.address, maxWithholdingBps: 3_000 })
-  record('deploy', { escrow: dep.address, minTtlSeconds: 60, note: 'test escrow — 60 s floor only so the expiry path can run inside this script; the CLI default is 14 days', taxAccount: taxAccount.address, maxWithholdingBps: 3_000, tx: dep.tx.hash, link: `${EXPLORER}/address/${dep.address}` })
+  const dep = await deployEscrow(org, { minTtlSeconds: 60, taxAccount: taxAccount.address, maxWithholdingBps: 3_000, reissueDelaySeconds: 20 })
+  record('deploy', { escrow: dep.address, minTtlSeconds: 60, note: 'test escrow: 60 s expiry floor and 20 s reissue notice so every path runs inside this script; CLI defaults are 14 days and 48 hours', taxAccount: taxAccount.address, maxWithholdingBps: 3_000, tx: dep.tx.hash, link: `${EXPLORER}/address/${dep.address}` })
   const escrow = new TempoEscrow(org, dep.address, dep.block)
 
   const winners = parseWinners('ref,amount,label\nWF-E2E-A,25,registers early\nWF-E2E-F,20,forwarded link\nWF-E2E-G,100,withholding\nWF-E2E-B,15,bearer\nWF-E2E-E,7,redirect\nWF-E2E-C,10,revoked\nWF-E2E-D,5,expires\n', 6)
@@ -105,7 +105,10 @@ async function main() {
   await registerAccount(P.F.link, thief.address, viemClaimKeys, gw(tempoClient(CHAIN, thief)), { chainId: CHAIN.id })
   record('F-clear-for-real-winner-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.F.id, hashOf('F kyc'), wF.address, 0n])))
   const newKey = viemClaimKeys.create()
-  const reissue = await escrow.reissueLink(P.F.id, newKey.address)
+  const scheduled = await escrow.reissueLink(P.F.id, newKey.address) // registered → schedules, with public notice
+  record('F-reissue-scheduled', { tx: scheduled.hash, statusAfter: (await statusBoard(escrow))[P.F.id].status })
+  await new Promise((r) => setTimeout(r, 22_000))
+  const reissue = await escrow.reissueLink(P.F.id, newKey.address) // after the notice period → executes
   record('F-old-link-refused', await mustRevert(tempoClient(CHAIN, thief), feePayer, dep.address, call('register', [P.F.id, thief.address, await sign('register', P.F.ref, thief.address)])))
   const newLink = encodeClaimLink('http://localhost:5174', { chainId: CHAIN.id, escrow: dep.address, ref: P.F.ref, claimKey: newKey.privateKey })
   const regF = await registerAccount(newLink, wF.address, viemClaimKeys, gw(tempoClient(CHAIN, wF)), { chainId: CHAIN.id })

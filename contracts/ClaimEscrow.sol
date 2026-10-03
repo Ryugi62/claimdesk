@@ -31,6 +31,14 @@ contract ClaimEscrow {
     ///         so withholding cannot become a disguised redirect.
     address public immutable taxAccount;
     uint16 public immutable maxWithholdingBps;
+    /// @notice Notice period before the organizer can wipe a winner's registration with a new link.
+    uint64 public immutable reissueDelay;
+
+    struct PendingReissue {
+        address signer;
+        uint64 notBefore;
+    }
+    mapping(bytes32 => PendingReissue) public pendingReissue;
     uint64 public constant MAX_TTL = 366 days;
     /// @dev Tempo's TIP-20 tokens live at precompile addresses starting 0x20c0 — no look-alike token contracts.
     bytes2 private constant TIP20_PREFIX = 0x20c0;
@@ -43,6 +51,7 @@ contract ClaimEscrow {
     event Registered(bytes32 indexed id, address indexed recipient);
     event RecipientChanged(bytes32 indexed id, address indexed previous, address indexed next);
     event LinkReissued(bytes32 indexed id, address claimSigner);
+    event ReissueScheduled(bytes32 indexed id, address claimSigner, uint64 notBefore);
     event Cleared(bytes32 indexed id, bytes32 paperworkHash, address recipient, uint256 withheld, address taxAccount);
     event Claimed(bytes32 indexed id, address indexed recipient, uint256 amount, bytes32 memo);
     event Revoked(bytes32 indexed id, uint256 amount);
@@ -67,12 +76,13 @@ contract ClaimEscrow {
         _;
     }
 
-    constructor(address organizer_, uint64 minTtl_, address taxAccount_, uint16 maxWithholdingBps_) {
+    constructor(address organizer_, uint64 minTtl_, address taxAccount_, uint16 maxWithholdingBps_, uint64 reissueDelay_) {
         if (maxWithholdingBps_ > 5_000 || (maxWithholdingBps_ > 0 && taxAccount_ == address(0))) revert InvalidWithholding();
         organizer = organizer_ == address(0) ? msg.sender : organizer_;
         minTtl = minTtl_;
         taxAccount = taxAccount_;
         maxWithholdingBps = maxWithholdingBps_;
+        reissueDelay = reissueDelay_;
         emit OrganizerChanged(address(0), organizer);
     }
 
@@ -107,15 +117,35 @@ contract ClaimEscrow {
             a.amount -= withheld;
             ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
         }
-        if (registered) _pay(id, a, a.party);
-        else a.status = Status.Cleared;
+        delete pendingReissue[id];
+        if (registered) {
+            _pay(id, a, a.party);
+        } else {
+            a.status = Status.Cleared;
+            // a bearer claim always gets a full window: clearing just before expiry and reclaiming is impossible
+            uint64 floor = uint64(block.timestamp) + minTtl;
+            if (a.expiresAt < floor) a.expiresAt = floor;
+        }
     }
 
-    /// @notice Before clearance: issue a new link key and wipe any registration (a leaked or forwarded link).
+    /// @notice Before clearance: issue a new link key (a leaked or forwarded link). Nobody registered → immediate.
+    ///         Someone registered → first call schedules it (public event, the award page shows it), and a second call
+    ///         with the same key after `reissueDelay` wipes the registration — a registered winner gets notice.
     function reissueLink(bytes32 id, address newSigner) external onlyOrganizer {
         Award storage a = _live(id);
         if (a.status != Status.Funded && a.status != Status.Registered) revert WrongState();
         if (newSigner == address(0)) revert InvalidAward();
+        if (a.status == Status.Registered) {
+            PendingReissue memory p = pendingReissue[id];
+            if (p.signer != newSigner || p.notBefore == 0) {
+                uint64 after_ = uint64(block.timestamp) + reissueDelay;
+                pendingReissue[id] = PendingReissue(newSigner, after_);
+                emit ReissueScheduled(id, newSigner, after_);
+                return;
+            }
+            if (block.timestamp < p.notBefore) revert NotExpired();
+        }
+        delete pendingReissue[id];
         a.party = newSigner;
         a.status = Status.Funded;
         emit LinkReissued(id, newSigner);

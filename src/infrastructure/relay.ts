@@ -4,9 +4,12 @@ import type { Hex } from '../application/ports'
 
 export const CLAIM_SELECTOR = toFunctionSelector('claim(bytes32,address,bytes)')
 export const REGISTER_SELECTOR = toFunctionSelector('register(bytes32,address,bytes)')
+export const CHANGE_RECIPIENT_SELECTOR = toFunctionSelector('changeRecipient(bytes32,address)')
 export const MAX_SPONSORED_GAS = 1_200_000n
-export const MAX_FEE_PER_GAS = 20_000_000_000n
-export const MAX_PRIORITY_FEE_PER_GAS = 2_000_000_000n
+export const MAX_FEE_PER_GAS = 5_000_000_000n
+export const MAX_PRIORITY_FEE_PER_GAS = 1_000_000_000n
+/** Sponsored transactions must expire soon (Tempo validBefore), so a co-signed transaction cannot be held and replayed later. */
+export const MAX_VALID_FOR_SECONDS = 180
 
 export interface SponsorRequest {
   from?: string
@@ -17,6 +20,7 @@ export interface SponsorRequest {
   maxFeePerGas?: bigint | number | string
   maxPriorityFeePerGas?: bigint | number | string
   feeToken?: string
+  validBefore?: bigint | number | string
   keyAuthorization?: unknown
   aaAuthorizationList?: readonly unknown[]
 }
@@ -28,14 +32,15 @@ export const awardIdOf = (data: string) => ('0x' + data.replace(/^0x/, '').slice
  * Sponsorship policy (pure): the organizer pays fees only for ONE register() or claim() call into its own escrows,
  * with bounded gas and no account-key side effects.
  */
-export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = []): boolean {
+export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = [], nowSec = Math.floor(Date.now() / 1000)): boolean {
   const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
   if (calls.length !== 1) return false
   if (tx.gas === undefined) return false // caps are mandatory, not optional
+  if (tx.validBefore !== undefined && Number(tx.validBefore) > nowSec + MAX_VALID_FOR_SECONDS) return false
   const [c] = calls
   if (!c.to || !escrows.some((e) => isAddressEqual(e, c.to as Hex))) return false
   const data = (c.data ?? '').toLowerCase()
-  if (!data.startsWith(CLAIM_SELECTOR) && !data.startsWith(REGISTER_SELECTOR)) return false
+  if (![CLAIM_SELECTOR, REGISTER_SELECTOR, CHANGE_RECIPIENT_SELECTOR].some((sel) => data.startsWith(sel))) return false
   if (tx.gas !== undefined && BigInt(tx.gas) > MAX_SPONSORED_GAS) return false
   if (tx.maxFeePerGas !== undefined && BigInt(tx.maxFeePerGas) > MAX_FEE_PER_GAS) return false
   if (tx.maxPriorityFeePerGas !== undefined && BigInt(tx.maxPriorityFeePerGas) > MAX_PRIORITY_FEE_PER_GAS) return false

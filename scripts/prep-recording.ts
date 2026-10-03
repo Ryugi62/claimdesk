@@ -6,9 +6,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { tempoClient, TempoWinner, viemClaimKeys } from '../src/adapters/tempoEscrow'
+import { tempoClient, TempoWinner, viemClaimKeys, paperworkDigest, recoverTempoSigner } from '../src/adapters/tempoEscrow'
+import { awardMemo } from '../src/domain/memo'
 import { registerAccount } from '../src/application/payouts'
-import { submit } from '../src/infrastructure/paperworkInbox'
+import { submit, recordHash } from '../src/infrastructure/paperworkInbox'
 import { CHAIN, requireEnv } from '../src/infrastructure/config'
 import type { Hex } from '../src/application/ports'
 
@@ -23,5 +24,8 @@ const feePayer = privateKeyToAccount(requireEnv('FEE_PAYER_KEY_TESTNET') as Hex)
 const forwardee = privateKeyToAccount(generatePrivateKey())
 await registerAccount(links[refs[2]], forwardee.address, viemClaimKeys, new TempoWinner(tempoClient(CHAIN, forwardee), feePayer), { chainId: CHAIN.id })
 const realWinner = privateKeyToAccount(generatePrivateKey())
-submit({ ref: refs[2], address: realWinner.address, legalName: 'Minh Tran', taxCountry: 'VN', formSignedAs: 'Minh Tran' })
+const escrow = requireEnv('ESCROW') as Hex
+const fields = { ref: refs[2], address: realWinner.address, legalName: 'Minh Tran', taxCountry: 'VN', formSignedAs: 'Minh Tran' }
+const digestFor = (f: { ref: string; address: string; legalName: string; taxCountry: string; formSignedAs: string }) => paperworkDigest(escrow, CHAIN.id, awardMemo(f.ref), f.address as Hex, recordHash(f))
+await submit({ ...fields, signature: await realWinner.sign({ hash: digestFor(fields) }) }, digestFor, (d, s) => recoverTempoSigner(tempoClient(CHAIN), d, s))
 console.log(JSON.stringify({ file, clip: refs[0], walkthrough: refs[1], forwarded: refs[2], forwardee: forwardee.address, paperworkFor: realWinner.address }))

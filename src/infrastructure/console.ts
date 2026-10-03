@@ -14,7 +14,7 @@ import { memoToRef, awardMemo } from '../domain/memo'
 import { describe } from '../domain/status'
 import { encodeClaimLink } from '../domain/claimLink'
 import { recordPaperwork, verifyAgainst } from './paperwork'
-import { latestSubmissions, bindingCheck } from './paperworkInbox'
+import { submissionsByRef, bindingCheck } from './paperworkInbox'
 import { send, json, body, consoleAllowed } from './http'
 import { CHAIN, EXPLORER, requireEnv, readEnv } from './config'
 import type { Hex } from '../application/ports'
@@ -32,11 +32,13 @@ const allLinks = () => linkFiles().flatMap((f) => (JSON.parse(readFileSync(f, 'u
 
 async function board() {
   const b = await statusBoard(escrow)
-  const inbox = latestSubmissions()
+  const inbox = submissionsByRef()
   return Object.values(b).map((v) => {
     const ref = memoToRef(v.id)
-    const paperwork = inbox[ref]
-    return { ...v, ref, says: describe(v).organizer, tone: describe(v).tone, paperwork: paperwork ?? null, binding: bindingCheck(v.registered, paperwork?.address) }
+    const subs = inbox[ref] ?? []
+    const check = bindingCheck(v.registered, subs)
+    const paperwork = check.forRegistered ?? subs[subs.length - 1] ?? null
+    return { ...v, ref, says: describe(v).organizer, tone: describe(v).tone, paperwork, binding: check.binding, conflicts: check.others.length }
   })
 }
 
@@ -58,6 +60,10 @@ createServer(async (req, res) => {
         const row = rows.find((r) => r.ref === i.ref)
         if (!row) throw new Error(`unknown award ${i.ref}`)
         if (!i.bearer && !i.expectedRecipient) throw new Error(`${i.ref}: no payout address from paperwork — paste the address the winner's paperwork names`)
+        // server-side check per award (also for batches): signed paperwork must exist for exactly this address
+        if (!i.bearer && (row.binding !== 'match' || row.paperwork?.address.toLowerCase() !== String(i.expectedRecipient).toLowerCase())) {
+          throw new Error(`${i.ref}: no signed paperwork for ${i.expectedRecipient} that matches the registered account — nothing was cleared`)
+        }
         const expected = (i.bearer ? ZERO : i.expectedRecipient) as Hex
         const p = row.paperwork
         const summary = [p ? `paperwork ${p.at}: ${p.legalName}, tax residence ${p.taxCountry}, signed as ${p.formSignedAs}, payout ${p.address}` : 'paperwork outside Claimdesk', i.note ?? ''].filter(Boolean).join(' | ')
@@ -75,8 +81,20 @@ createServer(async (req, res) => {
     if (req.method === 'POST' && path === '/api/reissue') {
       // new link key; the old link and any registration made with it stop working
       const { ref } = JSON.parse(await body(req))
-      const k = viemClaimKeys.create()
+      const row = (await board()).find((r) => r.ref === ref)
+      // a registered award needs notice: the first call schedules (same key reused), a later call executes
+      const pendingFile = 'paperwork/pending-links.json'
+      const pending: Record<string, Hex> = existsSync(pendingFile) ? JSON.parse(readFileSync(pendingFile, 'utf8')) : {}
+      const k = pending[ref] ? { privateKey: pending[ref], address: privateKeyToAccount(pending[ref]).address } : viemClaimKeys.create()
       const tx = await escrow.reissueLink(awardMemo(ref), k.address)
+      const after = (await board()).find((r) => r.ref === ref)
+      if (row?.status === 'Registered' && after?.status === 'Registered') {
+        pending[ref] = k.privateKey
+        writeFileSync(pendingFile, JSON.stringify(pending), { mode: 0o600 })
+        return json(res, 200, { tx: tx.hash, scheduled: true, notBefore: after.reissueAt })
+      }
+      delete pending[ref]
+      writeFileSync(pendingFile, JSON.stringify(pending), { mode: 0o600 })
       const old = allLinks().find((l) => l.ref === ref)
       const base = old ? old.link.slice(0, old.link.indexOf('/claim#')) : 'http://localhost:5174'
       const link = encodeClaimLink(base, { chainId: CHAIN.id, escrow: ESCROW, ref, claimKey: k.privateKey })

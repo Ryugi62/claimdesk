@@ -18,6 +18,12 @@ describe('sponsorship policy', () => {
     expect(ok({ calls: [{ to: ESCROW, data: CLAIM_SELECTOR }, { to: ESCROW, data: CLAIM_SELECTOR }] })).toBe(false)
     expect(ok({ calls: [] })).toBe(false)
   })
+  it('sponsors changeRecipient too, and refuses transactions that stay valid too long', () => {
+    expect(ok({ calls: [{ to: ESCROW, data: '0x' + 'ab'.repeat(4) }], gas: 1n })).toBe(false)
+    const now = 1_000_000
+    expect(sponsorable([ESCROW], { calls: [{ to: ESCROW, data: CLAIM_SELECTOR }], gas: 300_000n, validBefore: now + 60 }, [], now)).toBe(true)
+    expect(sponsorable([ESCROW], { calls: [{ to: ESCROW, data: CLAIM_SELECTOR }], gas: 300_000n, validBefore: now + 3_600 }, [], now)).toBe(false)
+  })
   it('refuses inflated gas and account-key side effects', () => {
     expect(ok({ calls: [{ to: ESCROW, data: CLAIM_SELECTOR }], gas: 5_000_000n })).toBe(false)
     expect(ok({ calls: [{ to: ESCROW, data: CLAIM_SELECTOR }], keyAuthorization: { any: 1 } })).toBe(false)

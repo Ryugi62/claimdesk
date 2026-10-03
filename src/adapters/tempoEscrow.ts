@@ -1,4 +1,4 @@
-import { createClient, custom, decodeErrorResult, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
+import { createClient, custom, decodeErrorResult, toHex, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoActions } from 'viem/tempo'
 import { claimEscrowAbi, claimEscrowBytecode } from './claimEscrowArtifact'
@@ -54,10 +54,10 @@ export async function txRef(client: TempoClient, receipt: { transactionHash: Hex
 }
 
 /** Deploys a new ClaimEscrow; `organizer` becomes its owner (defaults to the deployer). */
-export async function deployEscrow(client: TempoClient, opts: { organizer?: Hex; minTtlSeconds?: number; taxAccount?: Hex; maxWithholdingBps?: number } = {}): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
+export async function deployEscrow(client: TempoClient, opts: { organizer?: Hex; minTtlSeconds?: number; taxAccount?: Hex; maxWithholdingBps?: number; reissueDelaySeconds?: number } = {}): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
   const hash = await client.deployContract({
     abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex,
-    args: [opts.organizer ?? client.account!.address, BigInt(opts.minTtlSeconds ?? 7 * 86_400), opts.taxAccount ?? ZERO, opts.maxWithholdingBps ?? 0],
+    args: [opts.organizer ?? client.account!.address, BigInt(opts.minTtlSeconds ?? 14 * 86_400), opts.taxAccount ?? ZERO, opts.maxWithholdingBps ?? 0, BigInt(opts.reissueDelaySeconds ?? 2 * 86_400)],
     account: client.account!, chain: client.chain,
   })
   const receipt = await client.waitForTransactionReceipt({ hash })
@@ -110,6 +110,7 @@ function toEvent(l: { eventName: string; args: unknown; transactionHash: Hex | n
     case 'Registered': return { kind: 'Registered', ...base, recipient: a.recipient as string }
     case 'RecipientChanged': return { kind: 'RecipientChanged', ...base, recipient: a.next as string }
     case 'LinkReissued': return { kind: 'LinkReissued', ...base }
+    case 'ReissueScheduled': return { kind: 'ReissueScheduled', ...base, notBefore: Number(a.notBefore) }
     case 'Cleared': return { kind: 'Cleared', ...base, paperworkHash: a.paperworkHash as string, withheld: a.withheld as bigint }
     case 'Claimed': return { kind: 'Claimed', ...base, recipient: a.recipient as string, amount: a.amount as bigint }
     case 'Revoked': return { kind: 'Revoked', ...base }
@@ -203,7 +204,33 @@ export class TempoWinner implements WinnerGateway {
     return txRef(this.client, (await this.client.waitForTransactionReceipt({ hash })) as never)
   }
   register(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('register', a) }
+  /** The registered account moves the payout to another account it controls (sent BY the registered account). */
+  async changeRecipient(escrow: Hex, id: Hex, next: Hex): Promise<TxRef> {
+    const hash = await this.client.writeContract({ address: escrow, abi: claimEscrowAbi, functionName: 'changeRecipient', args: [id, next], account: this.client.account!, chain: this.client.chain, feePayer: this.feePayer } as never)
+    return txRef(this.client, (await this.client.waitForTransactionReceipt({ hash })) as never)
+  }
   claim(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('claim', a) }
+}
+
+/** Hash of a paperwork form (canonical field order) — the same on the winner's page and on the server. */
+export function paperworkRecordHash(f: { ref: string; address: string; legalName: string; taxCountry: string; formSignedAs: string }): Hex {
+  return keccak256(toHex(JSON.stringify([f.ref, f.address.toLowerCase(), f.legalName, f.taxCountry, f.formSignedAs])))
+}
+
+/** What a winner's account signs when submitting paperwork: binds (escrow, chain, award, payout account, record). */
+export function paperworkDigest(escrow: Hex, chainId: number, id: Hex, address: Hex, recordHash: Hex): Hex {
+  return keccak256(encodeAbiParameters(
+    [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes32' }, { type: 'address' }, { type: 'bytes32' }],
+    [keccak256(toBytes('claimdesk.paperwork')), escrow, BigInt(chainId), id, address, recordHash],
+  ))
+}
+
+export const SIGNATURE_VERIFIER = '0x5165300000000000000000000000000000000000' as Hex
+const verifierAbi = [{ type: 'function', name: 'recover', stateMutability: 'view', inputs: [{ name: 'hash', type: 'bytes32' }, { name: 'signature', type: 'bytes' }], outputs: [{ type: 'address' }] }] as const
+
+/** Tempo's signature-verifier precompile recovers secp256k1, P-256 and WebAuthn (passkey) signatures alike. */
+export async function recoverTempoSigner(client: TempoClient, hash: Hex, signature: Hex): Promise<Hex> {
+  return client.readContract({ address: SIGNATURE_VERIFIER, abi: verifierAbi, functionName: 'recover', args: [hash, signature] }) as Promise<Hex>
 }
 
 /** The escrow's custom error name inside a viem error (e.g. "RecipientMismatch"), else the first line of the message. */

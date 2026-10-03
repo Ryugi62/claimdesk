@@ -107,9 +107,23 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
     const reg = events.find((e) => e.kind === 'Registered' || e.kind === 'RecipientChanged')
     const regTx = reg?.txHash ?? recalled(escrow, ref)
     app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr" id="registered">${esc(registered)}</div><p>Next: complete the paperwork for this account. The organizer approves it for this address, and the payment goes nowhere else.</p>${regTx ? `<p class="alt">Registered on-chain: <a id="regtx" href="${esc(cfg.explorer)}/tx/${esc(regTx)}" target="_blank" rel="noopener">${esc(short(regTx))}</a></p>` : ''}</div>`)
+    const scheduled = [...events].reverse().find((e) => e.kind === 'ReissueScheduled')
+    const reissuedSince = scheduled && events.indexOf(scheduled) < events.length - 1 && events.slice(events.indexOf(scheduled) + 1).some((e) => e.kind === 'LinkReissued')
+    if (scheduled && scheduled.kind === 'ReissueScheduled' && !reissuedSince) {
+      app.insertAdjacentHTML('afterbegin', `<span class="chip warn">The organizer scheduled a new link for this award${scheduled.notBefore ? ` (after ${esc(new Date(scheduled.notBefore * 1000).toUTCString().replace(/:\d\d GMT/, ' UTC'))})` : ''} — if that's unexpected, contact them now</span>`)
+    }
     if (isMine(registered)) {
       const url = (cfg.paperworkUrl ?? 'paperwork?ref={ref}&address={address}').replace('{ref}', encodeURIComponent(ref)).replace('{address}', registered)
-      app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="account">Open my account</a></p>`)
+      app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="account">Open my account</a> · <a href="#" id="move">Pay a different account of mine</a></p>`)
+      document.getElementById('move')!.addEventListener('click', async (e) => {
+        e.preventDefault()
+        const to = prompt('Another Tempo or EVM address you control. Only this account (signed by your passkey) can make this change, and only before the organizer approves your paperwork.')?.trim()
+        if (!to) return
+        if (!isAddress(to)) return alert('That is not an address.')
+        const account = accountOf(savedPasskey()!)
+        await new TempoWinner(sponsoredClient(cfg, account) as never, true).changeRecipient(escrow, id, to as Hex)
+        await render(cfg, escrow, ref)
+      })
       button('Complete paperwork', async () => { location.href = url })
       // paid automatically on clearance — watch for it and switch to the receipt by itself
       const watch = setInterval(async () => {

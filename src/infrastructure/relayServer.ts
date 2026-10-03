@@ -1,6 +1,6 @@
 /**
  * Winner-facing server: claim + account pages and the sponsoring relay.
- * Holds ONLY the fee-payer key (small float) — never the organizer key.
+ * Reads ONLY .env.relay (fee-payer key, escrow, block, program) — never the organizer key.
  *   npm run relay   → http://localhost:5174   (HOST=0.0.0.0 to expose behind TLS)
  */
 import { createServer } from 'node:http'
@@ -9,19 +9,21 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join, extname } from 'node:path'
 import { http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { tempoClient } from '../adapters/tempoEscrow'
+import { tempoClient, paperworkDigest, recoverTempoSigner } from '../adapters/tempoEscrow'
+import { awardMemo } from '../domain/memo'
 import { createSponsorRelay, rateLimiter, relayMethodAllowed, clientIp } from './relay'
-import { submit } from './paperworkInbox'
+import { submit, recordHash } from './paperworkInbox'
 import { send, json, body } from './http'
-import { CHAIN, PATH_USD, requireEnv, readEnv } from './config'
+import { CHAIN, PATH_USD, RELAY_ENV_FILE, readEnv, requireRelayEnv } from './config'
 import type { Hex } from '../application/ports'
 
 const PORT = Number(process.env.PORT ?? 5174)
 const HOST = process.env.HOST ?? '127.0.0.1'
-const feePayer = privateKeyToAccount(requireEnv('FEE_PAYER_KEY_TESTNET') as Hex)
-const ESCROW = requireEnv('ESCROW') as Hex
-const ESCROW_BLOCK = requireEnv('ESCROW_BLOCK')
-const PROGRAM = readEnv().PROGRAM_NAME ?? 'Crypto Builders Prize (demo)'
+const feePayer = privateKeyToAccount(requireRelayEnv('FEE_PAYER_KEY_TESTNET') as Hex)
+const ESCROW = requireRelayEnv('ESCROW') as Hex
+const ESCROW_BLOCK = requireRelayEnv('ESCROW_BLOCK')
+const PROGRAM = readEnv(RELAY_ENV_FILE).PROGRAM_NAME ?? 'Crypto Builders Prize (demo)'
+const reader = tempoClient(CHAIN)
 const relay = createSponsorRelay(tempoClient(CHAIN, undefined, http()) as never, feePayer, [ESCROW], { feeTokens: [PATH_USD], name: PROGRAM }) as unknown as { fetch: (r: Request) => Promise<Response> }
 const perIp = rateLimiter(30, 60_000)
 const perIpPaperwork = rateLimiter(10, 3_600_000)
@@ -48,7 +50,11 @@ createServer(async (req, res) => {
       // stand-in for the organizer's KYC / tax-form provider webhook: lands in the organizer's local inbox
       if (!perIpPaperwork(ip)) return json(res, 429, { error: 'too many submissions' })
       try {
-        const s = submit(JSON.parse(await body(req)))
+        const s = await submit(
+          JSON.parse(await body(req)),
+          (f) => paperworkDigest(ESCROW, CHAIN.id, awardMemo(f.ref), f.address as Hex, recordHash(f)),
+          (digest, signature) => recoverTempoSigner(reader, digest, signature),
+        )
         return json(res, 200, { ok: true, ref: s.ref, address: s.address })
       } catch (e) {
         return json(res, 400, { error: (e as Error).message })

@@ -22,7 +22,7 @@ import { parseWinners } from '../domain/award'
 import { awardMemo, memoToRef } from '../domain/memo'
 import { formatUnits } from '../domain/receipt'
 import { describe } from '../domain/status'
-import { CHAIN, EXPLORER, PATH_USD, readEnv, requireEnv, setEnv } from './config'
+import { CHAIN, EXPLORER, PATH_USD, readEnv, requireEnv, setEnv, writeRelayEnv } from './config'
 import type { Hex } from '../application/ports'
 
 const [cmd, ...rest] = process.argv.slice(2)
@@ -46,9 +46,15 @@ async function main() {
       await Actions.faucet.fundSync(org, { account: organizer.address })
       await Actions.faucet.fundSync(org, { account: feePayer.address })
       const tax = flag('tax-account') as Hex | undefined
-      const d = await deployEscrow(org, { minTtlSeconds: Number(flag('min-ttl-days', '14')) * 86_400, taxAccount: tax ?? ZERO, maxWithholdingBps: tax ? Math.round(Number(flag('max-withhold-pct', '30')) * 100) : 0 })
+      const d = await deployEscrow(org, {
+        minTtlSeconds: Number(flag('min-ttl-seconds', String(Number(flag('min-ttl-days', '14')) * 86_400))),
+        taxAccount: tax ?? ZERO,
+        maxWithholdingBps: tax ? Math.round(Number(flag('max-withhold-pct', '30')) * 100) : 0,
+        reissueDelaySeconds: Number(flag('reissue-delay-seconds', String(48 * 3600))),
+      })
       setEnv('ESCROW', d.address)
       setEnv('ESCROW_BLOCK', d.block.toString())
+      writeRelayEnv() // the relay's own file: fee-payer key + escrow only
       console.log(`escrow ${d.address} (organizer ${organizer.address}, fee payer ${feePayer.address})\n${EXPLORER}/address/${d.address}`)
       break
     }
@@ -83,12 +89,17 @@ async function main() {
       console.log(`cleared ${ref} for ${expected === ZERO ? 'a bearer claim' : expected}${withheld ? `, withheld ${formatUnits(withheld, 6)}` : ''} (paperwork hash ${hash})\n${EXPLORER}/tx/${tx.hash}`)
       break
     }
+    case 'relay-env': {
+      writeRelayEnv()
+      console.log('.env.relay written (fee-payer key, escrow, block, program — no organizer key)')
+      break
+    }
     case 'reissue': {
       const ref = rest[0]
       const k = viemClaimKeys.create()
       const tx = await escrow().reissueLink(awardMemo(ref), k.address)
       const link = encodeClaimLink(flag('base', 'http://localhost:5174')!, { chainId: CHAIN.id, escrow: requireEnv('ESCROW'), ref, claimKey: k.privateKey })
-      console.log(`new link for ${ref} (send it to the verified winner only):\n${link}\n${EXPLORER}/tx/${tx.hash}`)
+      console.log(`reissue sent for ${ref}: if an account was registered this only SCHEDULES it (notice period) — run again after the delay with the same key.\nlink (valid once issued): ${link}\n${EXPLORER}/tx/${tx.hash}`)
       break
     }
     case 'verify': {

@@ -26,7 +26,7 @@ contract ClaimEscrowTest is Test {
         MockTIP20 impl = new MockTIP20();
         vm.etch(address(0x20C0000000000000000000000000000000000001), address(impl).code);
         token = MockTIP20(address(0x20C0000000000000000000000000000000000001));
-        escrow = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000);
+        escrow = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000, 2 days);
         claimSigner = vm.addr(claimPk);
         token.mint(organizer, 1_000_000e6);
         vm.prank(organizer);
@@ -123,10 +123,19 @@ contract ClaimEscrowTest is Test {
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
         escrow.clear(ID, keccak256("kyc for the real winner"), winner, 0);
-        // organizer reissues the link: registration wiped, old key dead
+        // organizer reissues the link: scheduled first (the registered account gets notice), executed after the delay
         uint256 newPk = 0xBEEF;
+        address newSigner = vm.addr(newPk);
         vm.prank(organizer);
-        escrow.reissueLink(ID, vm.addr(newPk));
+        escrow.reissueLink(ID, newSigner);
+        assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Registered)); // nothing wiped yet
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.NotExpired.selector);
+        escrow.reissueLink(ID, newSigner);
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(organizer);
+        escrow.reissueLink(ID, newSigner);
+        assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Funded));
         bytes memory oldKeySig = _regSig(forwardee);
         vm.expectRevert(ClaimEscrow.BadClaimSignature.selector);
         escrow.register(ID, forwardee, oldKeySig);
@@ -168,10 +177,10 @@ contract ClaimEscrowTest is Test {
 
     function test_deploy_rejectsUnsafeWithholdingSettings() public {
         vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
-        new ClaimEscrow(organizer, MIN_TTL, TAX, 5_001);
+        new ClaimEscrow(organizer, MIN_TTL, TAX, 5_001, 2 days);
         vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
-        new ClaimEscrow(organizer, MIN_TTL, address(0), 100);
-        ClaimEscrow none = new ClaimEscrow(organizer, MIN_TTL, address(0), 0); // no withholding at all is fine
+        new ClaimEscrow(organizer, MIN_TTL, address(0), 100, 2 days);
+        ClaimEscrow none = new ClaimEscrow(organizer, MIN_TTL, address(0), 0, 2 days); // no withholding at all is fine
         assertEq(none.maxWithholdingBps(), 0);
     }
 
@@ -211,7 +220,7 @@ contract ClaimEscrowTest is Test {
     }
 
     function test_pathB_redirect_highS_wrongLength_otherEscrow_revert() public {
-        ClaimEscrow other = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000);
+        ClaimEscrow other = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000, 2 days);
         _fund(MIN_TTL);
         _clearFor(address(0));
         bytes memory sig = _claimSig(winner);
@@ -230,6 +239,27 @@ contract ClaimEscrowTest is Test {
     }
 
     // ---- organizer commitment
+    function test_reissue_ofAnUnregisteredAward_isImmediate() public {
+        _fund(MIN_TTL);
+        address s2 = vm.addr(0xBEEF);
+        vm.prank(organizer);
+        escrow.reissueLink(ID, s2);
+        escrow.register(ID, winner, _sig(0xBEEF, escrow.registerDigest(ID, winner)));
+        assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Registered));
+    }
+
+    function test_bearerClearNearExpiry_extendsTheWindow_soItCannotBeReclaimed() public {
+        _fund(MIN_TTL);
+        vm.warp(block.timestamp + MIN_TTL - 1); // one second before expiry
+        _clearFor(address(0));
+        vm.warp(block.timestamp + 2);
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.NotExpired.selector);
+        escrow.reclaim(ID);
+        escrow.claim(ID, winner, _claimSig(winner));
+        assertEq(token.balanceOf(winner), AMOUNT);
+    }
+
     function test_afterClearance_organizerCannotRevokeOrReissue() public {
         _fund(MIN_TTL);
         _clearFor(address(0));

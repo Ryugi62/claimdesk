@@ -41,9 +41,15 @@ contract Handler is Test {
         uint256 pk = LINK_PK + ids.length;
         linkPk[id] = pk;
         ids.push(id);
+        uint64 expiresAt = uint64(block.timestamp + escrow.minTtl() + (ttlExtra % 30 days)); // before the prank
+        address signer = vm.addr(pk);
         vm.prank(organizer);
-        escrow.fund(id, address(token), amount, uint64(block.timestamp + escrow.minTtl() + (ttlExtra % 30 days)), vm.addr(pk));
+        escrow.fund(id, address(token), amount, expiresAt, signer);
+        funded++;
     }
+
+    uint256 public funded;
+    uint256 public paid;
 
     function register(uint256 seed, uint8 who) external {
         if (ids.length == 0) return;
@@ -58,15 +64,20 @@ contract Handler is Test {
         ClaimEscrow.Award memory a = escrow.awardOf(id);
         address expected = useRegistered && a.status == ClaimEscrow.Status.Registered ? a.party : address(0);
         uint96 withheld = uint96((uint256(a.amount) * bound(bps, 0, escrow.maxWithholdingBps())) / 10_000);
+        bool wasRegistered = a.status == ClaimEscrow.Status.Registered;
         vm.prank(organizer);
-        try escrow.clear(id, keccak256("paperwork"), expected, withheld) {} catch {}
+        try escrow.clear(id, keccak256("paperwork"), expected, withheld) {
+            if (wasRegistered && expected != address(0)) paid++;
+        } catch {}
     }
 
     function claim(uint256 seed, uint8 who) external {
         if (ids.length == 0) return;
         bytes32 id = _pick(seed);
         address to = people[who % 3];
-        try escrow.claim(id, to, _sig(linkPk[id], escrow.claimDigest(id, to))) {} catch {}
+        try escrow.claim(id, to, _sig(linkPk[id], escrow.claimDigest(id, to))) {
+            paid++;
+        } catch {}
     }
 
     function revoke(uint256 seed) external {
@@ -79,8 +90,9 @@ contract Handler is Test {
         if (ids.length == 0) return;
         bytes32 id = _pick(seed);
         uint256 pk = linkPk[id] + 1_000;
+        address signer = vm.addr(pk); // computed before the prank
         vm.prank(organizer);
-        try escrow.reissueLink(id, vm.addr(pk)) {
+        try escrow.reissueLink(id, signer) {
             linkPk[id] = pk;
         } catch {}
     }
@@ -107,7 +119,7 @@ contract ClaimEscrowInvariantTest is Test {
         MockTIP20 impl = new MockTIP20();
         vm.etch(address(0x20C0000000000000000000000000000000000001), address(impl).code);
         token = MockTIP20(address(0x20C0000000000000000000000000000000000001));
-        escrow = new ClaimEscrow(organizer, 7 days, address(0x1E5), 3_000);
+        escrow = new ClaimEscrow(organizer, 7 days, address(0x1E5), 3_000, 2 days);
         token.mint(organizer, SUPPLY);
         vm.prank(organizer);
         token.approve(address(escrow), type(uint256).max);
@@ -125,6 +137,15 @@ contract ClaimEscrowInvariantTest is Test {
             }
         }
         assertEq(token.balanceOf(address(escrow)), open);
+    }
+
+    /// The handler really exercises the escrow (guards against a vacuous run).
+    function invariant_suiteIsNotVacuous() public view {
+        if (handler.idsLength() > 0) assertEq(handler.funded(), handler.idsLength());
+    }
+
+    function afterInvariant() public view {
+        assertGt(handler.funded(), 0, "no award was ever funded");
     }
 
     /// No money is created or lost: organizer + winners + tax account + escrow = what the organizer started with.

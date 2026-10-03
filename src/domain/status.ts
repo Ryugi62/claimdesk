@@ -6,6 +6,7 @@ export type EscrowEvent =
   | { kind: 'Registered'; id: string; recipient: string; txHash?: string }
   | { kind: 'RecipientChanged'; id: string; recipient: string; txHash?: string }
   | { kind: 'LinkReissued'; id: string; txHash?: string }
+  | { kind: 'ReissueScheduled'; id: string; notBefore?: number; txHash?: string }
   | { kind: 'Cleared'; id: string; paperworkHash?: string; withheld?: bigint; txHash?: string }
   | { kind: 'Claimed'; id: string; recipient: string; amount?: bigint; txHash?: string }
   | { kind: 'Revoked'; id: string; txHash?: string }
@@ -22,6 +23,8 @@ export interface AwardView {
   recipient?: string
   withheld?: bigint
   paperworkHash?: string
+  /** a new link is scheduled to replace the registration at this time (unix s) */
+  reissueAt?: number
   txs: Partial<Record<EscrowEvent['kind'], string>>
 }
 
@@ -29,7 +32,7 @@ type Raw = 'None' | 'Funded' | 'Registered' | 'Cleared' | 'Claimed' | 'Reclaimed
 const NEXT: Record<Raw, Partial<Record<EscrowEvent['kind'], Raw>>> = {
   None: { Funded: 'Funded' },
   Funded: { Registered: 'Registered', LinkReissued: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
-  Registered: { RecipientChanged: 'Registered', LinkReissued: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
+  Registered: { RecipientChanged: 'Registered', ReissueScheduled: 'Registered', LinkReissued: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
   Cleared: { Claimed: 'Claimed', Reclaimed: 'Reclaimed' },
   Claimed: {},
   Reclaimed: {},
@@ -56,7 +59,11 @@ export function reconcile(events: EscrowEvent[], nowSec: number): Record<string,
       v.expiresAt = e.expiresAt
     }
     if (e.kind === 'Registered' || e.kind === 'RecipientChanged') v.registered = e.recipient
-    if (e.kind === 'LinkReissued') v.registered = undefined
+    if (e.kind === 'LinkReissued') {
+      v.registered = undefined
+      v.reissueAt = undefined
+    }
+    if (e.kind === 'ReissueScheduled') v.reissueAt = e.notBefore
     if (e.kind === 'Cleared') {
       v.paperworkHash = e.paperworkHash
       if (e.withheld) v.withheld = e.withheld
