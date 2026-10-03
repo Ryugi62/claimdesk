@@ -78,7 +78,7 @@ async function load() {
     const sel = x.status === 'Registered' && x.binding === 'match' ? `<input type="checkbox" data-sel="${esc(x.ref)}" aria-label="select ${esc(x.ref)}" style="width:auto;height:auto;display:inline;margin:0 6px 0 0">` : ''
     const act = canClear ? `<button data-clear="${esc(x.ref)}">Clear &amp; pay</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
       : conflict ? `<button data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-clear="${esc(x.ref)}">Review</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
-      : x.status === 'Registered' ? `<button class="ghost" data-clear="${esc(x.ref)}">Clear (paste paperwork address)</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
+      : x.status === 'Registered' ? `<button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
       : x.status === 'Funded' ? `<button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button><button class="ghost" data-bearer="${esc(x.ref)}" title="Pays whoever holds the link — only if you delivered it to a verified person">Advanced: open bearer claim</button>`
       : x.paperworkHash ? `<button class="ghost" data-verify="${esc(x.ref)}">Verify paperwork</button>` : ''
     const pill = conflict ? '<span class="chip conflict">Conflict — paperwork names another account</span>' : `<span class="chip ${x.tone}">${esc(x.says)}</span>`
