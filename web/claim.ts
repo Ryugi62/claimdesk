@@ -187,6 +187,9 @@ async function showReceipt(cfg: Config, escrow: Hex, ref: string, txHash: Hex, r
   })
 }
 
+// a different link opened in the same tab (only the fragment changes) → start over with the new link
+addEventListener('hashchange', () => location.reload())
+
 main().catch((e) => {
   app.innerHTML = `<p class="err">${esc((e as Error).message.split('\n')[0])}</p>`
 })

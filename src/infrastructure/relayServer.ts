@@ -42,7 +42,10 @@ createServer(async (req, res) => {
       const raw = await body(req)
       let parsed: unknown
       try { parsed = JSON.parse(raw) } catch { return json(res, 400, { error: 'bad json' }) }
-      if (!relayMethodAllowed(parsed)) return json(res, 403, { error: 'method not offered by this relay' })
+      if (!relayMethodAllowed(parsed)) {
+        console.log('relay refused method(s):', JSON.stringify((Array.isArray(parsed) ? parsed : [parsed]).map((r) => (r as { method?: string }).method)))
+        return json(res, 403, { error: 'method not offered by this relay' })
+      }
       const out = await relay.fetch(new Request('http://relay/relay', { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw }))
       return send(res, out.status, 'application/json', await out.text())
     }

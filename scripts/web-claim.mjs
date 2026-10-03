@@ -31,7 +31,7 @@ async function paperwork(page, name, country) {
   await page.fill('#taxCountry', country)
   await page.fill('#formSignedAs', name)
   await page.click('#cta')
-  await page.waitForSelector('text=Paperwork sent', { timeout: 30000 })
+  await page.waitForSelector('text=Paperwork sent', { timeout: 60000 })
 }
 /** The organizer clears from the console UI: the address comes from the paperwork inbox, shown in the dialog. */
 async function consoleClear(ref) {
@@ -117,8 +117,14 @@ async function consoleClear(ref) {
   await cpage.screenshot({ path: 'docs/ui/organizer-mismatch-dialog-1280.png' })
   await cpage.click('dialog .no')
   await cpage.close()
+  const sched = await consoleApi('/api/reissue', { ref: refF })
+  note('F-organizer-scheduled-new-link', { tx: sched.tx, scheduled: sched.scheduled, notBefore: sched.notBefore })
+  await winner.page.goto(links[refF])
+  await winner.page.waitForSelector('text=scheduled a new link', { timeout: 60000 })
+  await winner.page.screenshot({ path: 'docs/ui/8-new-link-notice-390.png' })
+  while (Math.floor(Date.now() / 1000) < (sched.notBefore ?? 0) + 3) await new Promise((r) => setTimeout(r, 2000))
   const re = await consoleApi('/api/reissue', { ref: refF })
-  note('F-organizer-reissued', { tx: re.tx })
+  note('F-organizer-reissued', { tx: re.tx, scheduled: !!re.scheduled })
   await winner.page.goto(re.link)
   await winner.page.waitForSelector('.chip')
   await winner.page.click('#cta') // Use my account (the passkey made for the paperwork)
