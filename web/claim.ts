@@ -53,28 +53,30 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
     return
   }
   const meta = await tokenMeta(client, award.token)
-  const registered = award.recipient !== '0x0000000000000000000000000000000000000000' ? award.recipient : undefined
+  const registered = award.registered
   const mine = savedPasskey()
   const myAddress = mine ? accountOf(mine).address : undefined
   const isMine = (a?: string) => !!a && !!myAddress && a.toLowerCase() === myAddress.toLowerCase()
   const head = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${money(award.amount, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} · award ${esc(ref)}</div>`
-  const d = describeStatus({ status: award.status === 'Funded' || award.status === 'Cleared' || award.status === 'Claimed' || award.status === 'Expired' || award.status === 'Reclaimed' || award.status === 'Revoked' ? award.status : 'Inconsistent', registered })
-  const chip = { Funded: registered ? 'Account ready' : 'Waiting for paperwork', Cleared: 'Paperwork approved', Claimed: 'Paid', Expired: 'Expired', Reclaimed: 'Returned', Revoked: 'Cancelled' }[award.status as string] ?? 'Check with the organizer'
+  const d = describeStatus({ status: award.status })
+  const chip = { Funded: 'Locked for you', Registered: 'Account ready', Cleared: 'Paperwork approved', Claimed: 'Paid', Expired: 'Expired', Reclaimed: 'Returned', Revoked: 'Cancelled' }[award.status as string] ?? 'Check with the organizer'
   const how = `<details><summary>How this works</summary><p>A passkey is the fingerprint or face unlock on this device. It becomes your account on the Tempo network — no app, no seed phrase. The organizer pays the network fee. The money is already locked for you, and it moves only after the organizer approves your paperwork.</p></details>`
   const expires = `<p>Set aside until ${esc(new Date(award.expiresAt * 1000).toUTCString().replace(/:\d\d GMT/, ' UTC'))}.</p>`
 
+  const events = award.status === 'Claimed' || award.status === 'Registered' ? await escrowEvents(client, escrow, BigInt(cfg.escrows?.[escrow.toLowerCase()] ?? 0), id).catch(() => []) : []
   if (award.status === 'Claimed') {
-    const events = await escrowEvents(client, escrow, BigInt(cfg.escrows?.[escrow.toLowerCase()] ?? 0), id).catch(() => [])
     const paid = events.find((e) => e.kind === 'Claimed')
-    if (paid && paid.kind === 'Claimed' && isMine(paid.recipient)) return showReceipt(cfg, escrow, ref, paid.txHash as Hex, paid.recipient as Hex, award.amount, meta)
-    app.innerHTML = `${head}<span class="chip ok">${chip}</span><p>This award was paid to ${esc(short(paid && paid.kind === 'Claimed' ? paid.recipient : registered ?? ''))}.</p><p>On the device that received it, open <a href="account">your account</a>.</p>`
+    const cleared = events.find((e) => e.kind === 'Cleared')
+    const withheld = cleared && cleared.kind === 'Cleared' ? cleared.withheld : undefined
+    if (paid && paid.kind === 'Claimed' && isMine(paid.recipient)) return showReceipt(cfg, escrow, ref, paid.txHash as Hex, paid.recipient as Hex, paid.amount ?? award.amount, meta, undefined, withheld)
+    app.innerHTML = `${head}<span class="chip ok">${chip}</span><p>This award was paid to ${esc(short(paid && paid.kind === 'Claimed' ? paid.recipient : ''))}.</p><p>On the device that received it, open <a href="account">your account</a>.</p>`
     cta.style.display = 'none'
     return
   }
-  app.innerHTML = `${head}<span class="chip ${d.tone}">${chip}</span><p>${esc(d.winner)}</p>${award.status === 'Funded' || award.status === 'Cleared' ? expires : ''}${how}`
+  app.innerHTML = `${head}<span class="chip ${d.tone}">${chip}</span><p>${esc(d.winner)}</p>${['Funded', 'Registered', 'Cleared'].includes(award.status) ? expires : ''}${how}`
 
   const getAccount = async () => accountOf(savedPasskey() ?? (await createPasskey(`Claimdesk ${ref}`)))
-  if (award.status === 'Funded' && !registered) {
+  if (award.status === 'Funded') {
     app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="#" id="existing">I already have an address</a>${mine ? '' : ' · <a href="#" id="signin">Use a passkey I made before</a>'}</p>`)
     document.getElementById('signin')?.addEventListener('click', async (e) => { e.preventDefault(); await signInWithPasskey(); await render(cfg, escrow, ref) })
     document.getElementById('existing')!.addEventListener('click', async (e) => {
@@ -84,20 +86,24 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
       if (!isAddress(to)) return alert('That is not an address.')
       cta.disabled = true
       const sender = Account.fromSecp256k1(generatePrivateKey()) // throwaway sender; the claim key decides, the sponsor pays
-      await registerAccount(location.href, to as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, sender) as never, true), { chainId: cfg.chainId })
+      const tx = await registerAccount(location.href, to as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, sender) as never, true), { chainId: cfg.chainId })
+      remember(escrow, ref, tx.hash)
       await render(cfg, escrow, ref)
     })
     button(mine ? 'Use my account' : 'Create my account', async () => {
       cta.textContent = 'Waiting for your fingerprint or face…'
       const account = await getAccount()
       cta.textContent = 'Saving…'
-      await registerAccount(location.href, account.address as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, account) as never, true), { chainId: cfg.chainId })
+      const tx = await registerAccount(location.href, account.address as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, account) as never, true), { chainId: cfg.chainId })
+      remember(escrow, ref, tx.hash)
       await render(cfg, escrow, ref)
     })
     return
   }
-  if (award.status === 'Funded' && registered) {
-    app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr">${esc(registered)}</div><p>If the organizer asks for your address, this is it.</p></div>`)
+  if (award.status === 'Registered' && registered) {
+    const reg = events.find((e) => e.kind === 'Registered')
+    const regTx = reg?.txHash ?? recalled(escrow, ref)
+    app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr" id="registered">${esc(registered)}</div><p>Your organizer checks your paperwork for this address and pays it. If their form asks for your address, copy this one.</p>${regTx ? `<p class="alt">Registered on-chain: <a id="regtx" href="${esc(cfg.explorer)}/tx/${esc(regTx)}" target="_blank" rel="noopener">${esc(short(regTx))}</a></p>` : ''}</div>`)
     if (isMine(registered)) button('Open my account', async () => { location.href = 'account' })
     else cta.style.display = 'none'
     return
@@ -116,16 +122,23 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
   cta.style.display = 'none'
 }
 
-async function showReceipt(cfg: Config, escrow: Hex, ref: string, txHash: Hex, recipient: Hex, amount: bigint, meta: { symbol: string; decimals: number }, ms?: number) {
+function remember(escrow: string, ref: string, tx: string) {
+  try { localStorage.setItem(`claimdesk:reg:${escrow.toLowerCase()}:${ref}`, tx) } catch { /* private mode */ }
+}
+function recalled(escrow: string, ref: string): string | undefined {
+  try { return localStorage.getItem(`claimdesk:reg:${escrow.toLowerCase()}:${ref}`) ?? undefined } catch { return undefined }
+}
+
+async function showReceipt(cfg: Config, escrow: Hex, ref: string, txHash: Hex, recipient: Hex, amount: bigint, meta: { symbol: string; decimals: number }, ms?: number, withheld?: bigint) {
   const client = readClient(cfg)
   const r = await client.getTransactionReceipt({ hash: txHash })
   const block = await client.getBlock({ blockNumber: r.blockNumber })
-  const receipt = await receiptFor({ ref, amount, decimals: meta.decimals, symbol: meta.symbol, tx: { hash: txHash, blockTime: new Date(Number(block.timestamp) * 1000) }, memo: awardMemo(ref), recipient }, new EcbRates(), localCurrency())
+  const receipt = await receiptFor({ ref, amount, decimals: meta.decimals, symbol: meta.symbol, tx: { hash: txHash, blockTime: new Date(Number(block.timestamp) * 1000) }, memo: awardMemo(ref), recipient, withheld }, new EcbRates(), localCurrency())
   const explorerUrl = `${cfg.explorer}/tx/${txHash}`
-  const local = receipt.local ? `<div class="card"><div class="program">For your records</div><div class="local">≈ ${esc(receipt.local.amountText)} ${esc(receipt.local.currency)}</div><p>at the ECB reference rate of ${esc(receipt.local.rateDate)} (1 USD = ${Number(receipt.local.rate).toLocaleString('en-US')} ${esc(receipt.local.currency)})</p></div>` : ''
+  const local = receipt.local ? `<div class="card"><div class="program">For your records</div><div class="local">≈ ${esc(receipt.local.amountText)} ${esc(receipt.local.currency)}</div><p>USD/${esc(receipt.local.currency)} cross rate from the ECB reference rates of ${esc(receipt.local.rateDate)} (1 USD = ${Number(receipt.local.rate).toLocaleString('en-US')} ${esc(receipt.local.currency)}). Your tax office may require its own official rate.</p></div>` : ''
   app.innerHTML = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${esc(receipt.amountText)}</div><div class="unit">${esc(receipt.symbol)} received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
-  <span class="chip ok">Received</span>${local}
-  <p class="alt"><a href="account">Open my account</a> — send it to an exchange or another wallet.</p>
+  <span class="chip ok">Received</span>${receipt.withholding ? `<p>Award $${esc(receipt.withholding.grossText)} − $${esc(receipt.withholding.withheldText)} tax withheld at source by the organizer.</p>` : ''}${local}
+  <p class="alt"><a href="account">Open my account</a> — move it to your own wallet or an exchange that accepts Tempo deposits.</p>
   <details><summary>Receipt details</summary><dl>
     <dt>Award</dt><dd>${esc(receipt.memoText)}</dd>
     <dt>Time (UTC)</dt><dd>${esc(receipt.blockTimeUtc)}</dd>

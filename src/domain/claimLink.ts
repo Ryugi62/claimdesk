@@ -22,7 +22,8 @@ const KEY = /^0x[0-9a-fA-F]{64}$/
 export function encodeClaimLink(baseUrl: string, d: ClaimLinkData): string {
   if (!ADDRESS.test(d.escrow)) throw new Error('escrow must be an address')
   if (!KEY.test(d.claimKey)) throw new Error('claim key must be 32 bytes')
-  const body = ['v1', String(d.chainId), d.escrow, encodeURIComponent(d.ref), d.claimKey].join('.')
+  // '.' separates fields, so it is escaped inside the reference too
+  const body = ['v1', String(d.chainId), d.escrow, encodeURIComponent(d.ref).replace(/\./g, '%2E'), d.claimKey].join('.')
   return `${baseUrl.replace(/\/$/, '')}/claim#${body}.${crc32(body)}`
 }
 

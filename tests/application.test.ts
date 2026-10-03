@@ -15,6 +15,8 @@ class FakeEscrow implements EscrowGateway {
   address = ESCROW; chainId = 42431; log: EscrowEvent[] = []; now = 0; batches = 0
   async fundMany(_t: Hex, awards: NewAward[]) { this.batches++; for (const a of awards) this.log.push({ kind: 'Funded', id: a.id, amount: a.amount, expiresAt: a.expiresAt }); return tx('0xf') }
   async clear(id: Hex) { this.log.push({ kind: 'Cleared', id }); return tx('0xc') }
+  async clearMany(items: { id: Hex }[]) { for (const i of items) this.log.push({ kind: 'Cleared', id: i.id }); return tx('0xcm') }
+  async reissueLink(id: Hex) { this.log.push({ kind: 'LinkReissued', id }); return tx('0xri') }
   async revoke(id: Hex) { this.log.push({ kind: 'Revoked', id }); return tx('0xv') }
   async reclaim(id: Hex) { this.log.push({ kind: 'Reclaimed', id }); return tx('0xr') }
   async events() { return this.log }

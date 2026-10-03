@@ -28,6 +28,13 @@ describe('AC-2 claim link', () => {
     expect(link.split('#')[0]).not.toContain(KEY.slice(2))
     expect(parseClaimLink(link)).toEqual({ chainId: 42431, escrow: ESCROW, ref: 'WF-03', claimKey: KEY })
   })
+  it('round-trips every printable ASCII reference, including dots', () => {
+    for (let c = 0x20; c <= 0x7e; c++) {
+      const ref = `GRANT-v1.2${String.fromCharCode(c)}`
+      const l = encodeClaimLink('https://c.example', { chainId: 1, escrow: ESCROW, ref, claimKey: KEY })
+      expect(parseClaimLink(l).ref).toBe(ref)
+    }
+  })
   it('rejects a tampered link', () => {
     const tampered = link.replace('WF-03', 'WF-04')
     expect(() => parseClaimLink(tampered)).toThrow(/checksum/)
@@ -62,9 +69,11 @@ describe('AC-9 reconcile', () => {
     expect(claimed.recipient).toBe('0xabc')
     expect(reconcile([...base, { kind: 'Reclaimed' as const, id: memo }], 150)[memo].status).toBe('Reclaimed')
   })
-  it('registration keeps Funded and remembers the account; clearance then pays it', () => {
+  it('registration is its own state; clearance then pays that account; reissue wipes it', () => {
     const ev = [{ kind: 'Funded' as const, id: memo, amount: 5n, expiresAt: 100 }, { kind: 'Registered' as const, id: memo, recipient: '0xw' }]
-    expect(reconcile(ev, 10)[memo]).toMatchObject({ status: 'Funded', registered: '0xw' })
+    expect(reconcile(ev, 10)[memo]).toMatchObject({ status: 'Registered', registered: '0xw' })
+    expect(reconcile([...ev, { kind: 'LinkReissued' as const, id: memo }], 10)[memo]).toMatchObject({ status: 'Funded', registered: undefined })
+    expect(reconcile([...ev, { kind: 'RecipientChanged' as const, id: memo, recipient: '0xcold' }], 10)[memo]).toMatchObject({ status: 'Registered', registered: '0xcold' })
     const paid = reconcile([...ev, { kind: 'Cleared' as const, id: memo }, { kind: 'Claimed' as const, id: memo, recipient: '0xw' }], 10)[memo]
     expect(paid).toMatchObject({ status: 'Claimed', recipient: '0xw' })
   })
@@ -81,7 +90,8 @@ describe('AC-9 reconcile', () => {
 
 describe('status copy', () => {
   it('tells a registered winner they will be paid automatically', () => {
-    expect(describeStatus({ status: 'Funded', registered: '0xw' }).winner).toMatch(/automatically/)
+    expect(describeStatus({ status: 'Registered' }).winner).toMatch(/automatically/)
+    expect(describeStatus({ status: 'Registered' }).tone).toBe('ok')
     expect(describeStatus({ status: 'Funded' }).winner).toMatch(/Create your account/)
   })
 })
@@ -97,6 +107,11 @@ describe('AC-8 receipt', () => {
   it('refuses a rate dated after the payment', () => {
     expect(() => buildReceipt({ ref: 'A', amount: 1n, decimals: 6, symbol: 'x', txHash: '0x', blockTime: new Date('2026-10-01T00:00:00Z'), memo: awardMemo('A'), recipient: '0x' },
       { currency: 'KRW', rate: 1, rateDate: '2026-10-02', source: 's' })).toThrow(/after/)
+  })
+  it('shows gross and withheld when tax was withheld at source', () => {
+    const r = buildReceipt({ ref: 'A', amount: 7_000_000n, decimals: 6, symbol: 'x', txHash: '0x', blockTime: new Date('2026-10-05T00:00:00Z'), memo: awardMemo('A'), recipient: '0x', withheld: 3_000_000n })
+    expect(r.amountText).toBe('7.00')
+    expect(r.withholding).toEqual({ grossText: '10.00', withheldText: '3.00' })
   })
   it('uses two decimals for currencies with minor units', () => {
     const r = buildReceipt({ ref: 'A', amount: 1_000_000n, decimals: 6, symbol: 'x', txHash: '0x', blockTime: new Date('2026-10-05T00:00:00Z'), memo: awardMemo('A'), recipient: '0x' },

@@ -1,11 +1,13 @@
 /** Award status from escrow events — the organizer's reconciliation view and the winner's page. */
-export type AwardStatus = 'Funded' | 'Cleared' | 'Claimed' | 'Expired' | 'Reclaimed' | 'Revoked' | 'Inconsistent'
+export type AwardStatus = 'Funded' | 'Registered' | 'Cleared' | 'Claimed' | 'Expired' | 'Reclaimed' | 'Revoked' | 'Inconsistent'
 
 export type EscrowEvent =
   | { kind: 'Funded'; id: string; amount: bigint; expiresAt: number; txHash?: string }
   | { kind: 'Registered'; id: string; recipient: string; txHash?: string }
-  | { kind: 'Cleared'; id: string; paperworkHash?: string; txHash?: string }
-  | { kind: 'Claimed'; id: string; recipient: string; txHash?: string }
+  | { kind: 'RecipientChanged'; id: string; recipient: string; txHash?: string }
+  | { kind: 'LinkReissued'; id: string; txHash?: string }
+  | { kind: 'Cleared'; id: string; paperworkHash?: string; withheld?: bigint; txHash?: string }
+  | { kind: 'Claimed'; id: string; recipient: string; amount?: bigint; txHash?: string }
   | { kind: 'Revoked'; id: string; txHash?: string }
   | { kind: 'Reclaimed'; id: string; txHash?: string }
 
@@ -14,17 +16,20 @@ export interface AwardView {
   status: AwardStatus
   amount?: bigint
   expiresAt?: number
-  /** account the winner registered through the link (paid automatically on clearance) */
+  /** account registered through the link (paid automatically on clearance) */
   registered?: string
   /** account actually paid */
   recipient?: string
+  withheld?: bigint
+  paperworkHash?: string
   txs: Partial<Record<EscrowEvent['kind'], string>>
 }
 
-type Raw = 'None' | 'Funded' | 'Cleared' | 'Claimed' | 'Reclaimed' | 'Revoked' | 'Inconsistent'
+type Raw = 'None' | 'Funded' | 'Registered' | 'Cleared' | 'Claimed' | 'Reclaimed' | 'Revoked' | 'Inconsistent'
 const NEXT: Record<Raw, Partial<Record<EscrowEvent['kind'], Raw>>> = {
   None: { Funded: 'Funded' },
-  Funded: { Registered: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
+  Funded: { Registered: 'Registered', LinkReissued: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
+  Registered: { RecipientChanged: 'Registered', LinkReissued: 'Funded', Cleared: 'Cleared', Revoked: 'Revoked', Reclaimed: 'Reclaimed' },
   Cleared: { Claimed: 'Claimed', Reclaimed: 'Reclaimed' },
   Claimed: {},
   Reclaimed: {},
@@ -50,24 +55,29 @@ export function reconcile(events: EscrowEvent[], nowSec: number): Record<string,
       v.amount = e.amount
       v.expiresAt = e.expiresAt
     }
-    if (e.kind === 'Registered') v.registered = e.recipient
+    if (e.kind === 'Registered' || e.kind === 'RecipientChanged') v.registered = e.recipient
+    if (e.kind === 'LinkReissued') v.registered = undefined
+    if (e.kind === 'Cleared') {
+      v.paperworkHash = e.paperworkHash
+      if (e.withheld) v.withheld = e.withheld
+    }
     if (e.kind === 'Claimed') v.recipient = e.recipient
   }
   const result: Record<string, AwardView> = {}
   for (const [id, { raw, ...v }] of Object.entries(out)) {
-    if ((raw === 'Funded' || raw === 'Cleared') && v.expiresAt !== undefined && nowSec >= v.expiresAt) v.status = 'Expired'
+    if ((raw === 'Funded' || raw === 'Registered' || raw === 'Cleared') && v.expiresAt !== undefined && nowSec >= v.expiresAt) v.status = 'Expired'
     result[id] = v
   }
   return result
 }
 
 /** One sentence per state, for the people on both sides. */
-export function describe(v: Pick<AwardView, 'status' | 'registered'>): { tone: 'ok' | 'warn' | 'no'; organizer: string; winner: string } {
+export function describe(v: Pick<AwardView, 'status'>): { tone: 'ok' | 'warn' | 'no'; organizer: string; winner: string } {
   switch (v.status) {
     case 'Funded':
-      return v.registered
-        ? { tone: 'warn', organizer: 'Account ready — clear paperwork to pay', winner: 'Your account is ready. You will be paid automatically when the organizer approves your paperwork.' }
-        : { tone: 'warn', organizer: 'Waiting for the winner and paperwork', winner: 'Your award is set aside for you. Create your account now so it arrives automatically once your paperwork is approved.' }
+      return { tone: 'warn', organizer: 'Waiting for the winner to open the link', winner: 'Your award is locked for you. Create your account now — it is paid there automatically once the organizer approves your paperwork.' }
+    case 'Registered':
+      return { tone: 'ok', organizer: 'Account ready — check paperwork for this address, then clear', winner: 'Your account is ready. You will be paid automatically when the organizer approves your paperwork.' }
     case 'Cleared':
       return { tone: 'ok', organizer: 'Paperwork approved — winner can receive', winner: 'Paperwork approved. Receive it in one step.' }
     case 'Claimed':

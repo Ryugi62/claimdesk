@@ -58,7 +58,7 @@ export async function statusBoard(escrow: EscrowGateway): Promise<Record<string,
 
 /** UC-6 — receipt for the winner's records. The local amount is best-effort: no rate → USD only, never an error. */
 export async function receiptFor(
-  payment: { ref: string; amount: bigint; decimals: number; symbol: string; tx: TxRef; memo: Hex; recipient: Hex },
+  payment: { ref: string; amount: bigint; decimals: number; symbol: string; tx: TxRef; memo: Hex; recipient: Hex; withheld?: bigint },
   fx: FxRates | undefined,
   currency: string | undefined,
 ): Promise<Receipt> {

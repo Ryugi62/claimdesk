@@ -9,6 +9,8 @@ export interface Payment {
   blockTime: Date
   memo: string
   recipient: string
+  /** tax withheld at source by the organizer (already deducted from `amount`) */
+  withheld?: bigint
 }
 
 export interface FxQuote {
@@ -27,6 +29,8 @@ export interface Receipt {
   memo: string
   memoText: string
   recipient: string
+  /** present when tax was withheld: gross = amount + withheld */
+  withholding?: { grossText: string; withheldText: string }
   local?: FxQuote & { amountText: string }
 }
 
@@ -62,6 +66,9 @@ export function buildReceipt(p: Payment, fx?: FxQuote): Receipt {
     memo: p.memo,
     memoText: memoToRef(p.memo),
     recipient: p.recipient,
+  }
+  if (p.withheld && p.withheld > 0n) {
+    receipt.withholding = { grossText: group(p.amount + p.withheld, p.decimals), withheldText: group(p.withheld, p.decimals) }
   }
   if (fx) {
     if (fx.rateDate > p.blockTime.toISOString().slice(0, 10)) throw new Error('reference rate is dated after the payment')

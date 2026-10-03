@@ -1,7 +1,7 @@
 {
   "name": "claimdesk",
   "version": "0.1.0",
-  "description": "Pay every winner by link — claim-link payouts for prize, bounty and grant programs on Tempo",
+  "description": "Pay every winner by link \u2014 claim-link payouts for prize, bounty and grant programs on Tempo",
   "scripts": {
     "test": "vitest run",
     "test:contracts": "forge test",
@@ -9,7 +9,8 @@
     "build": "node scripts/build.mjs",
     "cli": "tsx src/infrastructure/cli.ts",
     "e2e:moderato": "tsx scripts/e2e-moderato.ts",
-    "serve": "tsx src/infrastructure/server.ts"
+    "relay": "tsx src/infrastructure/relayServer.ts",
+    "console": "tsx src/infrastructure/console.ts"
   },
   "license": "MIT",
   "type": "module",

@@ -2,17 +2,21 @@
  * Organizer CLI (testnet).
  *   npm run cli -- deploy                          new escrow + a separate fee-payer key (both funded from the testnet faucet)
  *   npm run cli -- batch winners.csv --days 14     fund every award in ONE transaction; private claim links → batches/
- *   npm run cli -- clear <REF> --paperwork "<what was collected>"   (pays the winner now if they registered an account)
+ *   npm run cli -- clear <REF> --paperwork "<what was collected>" [--recipient 0x…] [--withhold-pct 30 --tax-account 0x…]
+ *                                                  pays the registered account now (it must equal --recipient if given)
+ *   npm run cli -- reissue <REF>                   new link key; the old link and its registration stop counting
+ *   npm run cli -- verify <REF>                    re-derive the on-chain paperwork hash from the local record
  *   npm run cli -- revoke <REF>                    before clearance; money returns now
  *   npm run cli -- reclaim <REF>                   after expiry
  *   npm run cli -- status                          one line per award, from the chain's own events
  */
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { keccak256, toHex } from 'viem'
 import { Actions } from 'viem/tempo'
-import { tempoClient, deployEscrow, TempoEscrow, viemClaimKeys } from '../adapters/tempoEscrow'
+import { tempoClient, deployEscrow, TempoEscrow, viemClaimKeys, readAward, ZERO } from '../adapters/tempoEscrow'
 import { createBatch, fundBatch, statusBoard } from '../application/payouts'
+import { encodeClaimLink } from '../domain/claimLink'
+import { recordPaperwork, verifyAgainst } from './paperwork'
 import { parseWinners } from '../domain/award'
 import { awardMemo, memoToRef } from '../domain/memo'
 import { formatUnits } from '../domain/receipt'
@@ -40,7 +44,7 @@ async function main() {
       const feePayer = privateKeyToAccount(key('FEE_PAYER_KEY_TESTNET'))
       await Actions.faucet.fundSync(org, { account: organizer.address })
       await Actions.faucet.fundSync(org, { account: feePayer.address })
-      const d = await deployEscrow(org)
+      const d = await deployEscrow(org, { minTtlSeconds: Number(flag('min-ttl-days', '7')) * 86_400 })
       setEnv('ESCROW', d.address)
       setEnv('ESCROW_BLOCK', d.block.toString())
       console.log(`escrow ${d.address} (organizer ${organizer.address}, fee payer ${feePayer.address})\n${EXPLORER}/address/${d.address}`)
@@ -64,10 +68,31 @@ async function main() {
     }
     case 'clear': {
       const ref = rest[0]
-      const paperwork = flag('paperwork', 'paperwork complete')!
-      const hash = keccak256(toHex(JSON.stringify({ ref, paperwork, at: new Date().toISOString() })))
-      const tx = await escrow().clear(awardMemo(ref), hash)
-      console.log(`cleared ${ref} (paperwork hash ${hash})\n${EXPLORER}/tx/${tx.hash}`)
+      const e = escrow()
+      const award = await readAward(org, e.address, awardMemo(ref))
+      const expected = (award.registered ?? ZERO) as Hex
+      const given = flag('recipient')
+      if (given && given.toLowerCase() !== expected.toLowerCase()) throw new Error(`registered account is ${expected}, not ${given} — reissue the link if the winner did not register it`)
+      const { hash } = recordPaperwork(ref, expected, flag('paperwork', '') ?? '')
+      const pct = Number(flag('withhold-pct', '0'))
+      const withheld = (award.amount * BigInt(Math.round(pct * 100))) / 10_000n
+      const tx = await e.clear(awardMemo(ref), hash, expected, withheld, (flag('tax-account') ?? ZERO) as Hex)
+      console.log(`cleared ${ref} for ${expected === ZERO ? 'a bearer claim' : expected}${withheld ? `, withheld ${formatUnits(withheld, 6)}` : ''} (paperwork hash ${hash})\n${EXPLORER}/tx/${tx.hash}`)
+      break
+    }
+    case 'reissue': {
+      const ref = rest[0]
+      const k = viemClaimKeys.create()
+      const tx = await escrow().reissueLink(awardMemo(ref), k.address)
+      const link = encodeClaimLink(flag('base', 'http://localhost:5174')!, { chainId: CHAIN.id, escrow: requireEnv('ESCROW'), ref, claimKey: k.privateKey })
+      console.log(`new link for ${ref} (send it to the verified winner only):\n${link}\n${EXPLORER}/tx/${tx.hash}`)
+      break
+    }
+    case 'verify': {
+      const ref = rest[0]
+      const v = (await statusBoard(escrow()))[awardMemo(ref)]
+      const rec = v?.paperworkHash ? verifyAgainst(v.paperworkHash, ref) : undefined
+      console.log(rec ? `on-chain hash ${v!.paperworkHash} = local record of ${rec.at}: ${rec.paperwork}` : `no local record matches ${v?.paperworkHash ?? '(not cleared)'}`)
       break
     }
     case 'revoke':
@@ -78,12 +103,12 @@ async function main() {
     }
     case 'status': {
       for (const v of Object.values(await statusBoard(escrow()))) {
-        console.log([memoToRef(v.id).padEnd(18), describe(v).organizer.padEnd(40), v.amount !== undefined ? formatUnits(v.amount, 6).padStart(10) : '', v.recipient ?? v.registered ?? ''].join('  '))
+        console.log([memoToRef(v.id).padEnd(20), describe(v).organizer.padEnd(58), v.amount !== undefined ? formatUnits(v.amount, 6).padStart(10) : '', v.recipient ?? v.registered ?? ''].join('  '))
       }
       break
     }
     default:
-      console.log('commands: deploy | batch <winners.csv> [--days N] [--base URL] | clear <REF> [--paperwork "..."] | revoke <REF> | reclaim <REF> | status')
+      console.log('commands: deploy [--min-ttl-days 7] | batch <winners.csv> [--days N] [--base URL] | clear <REF> --paperwork "..." [--recipient 0x…] [--withhold-pct N --tax-account 0x…] | reissue <REF> | verify <REF> | revoke <REF> | reclaim <REF> | status')
   }
 }
 

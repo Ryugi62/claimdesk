@@ -1,4 +1,5 @@
 import { isAddress, parseUnits, pad, stringToHex } from 'viem'
+import { formatUnits } from '../src/domain/receipt'
 import { balanceOf, tokenMeta, tip20Abi } from '../src/adapters/tempoEscrow'
 import { loadConfig, readClient, selfPayClient, savedPasskey, signInWithPasskey, accountOf, esc, money, type Config } from './common'
 import type { Hex } from '../src/application/ports'
@@ -31,11 +32,16 @@ async function show(cfg: Config) {
   app.innerHTML = `<div class="program">Your account · Tempo</div><div class="amount">$${money(bal, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} on Tempo</div><div class="addr">${esc(account.address)}</div>
   <div class="card"><div class="program">Send</div>
     <label>To (exchange deposit address or wallet)<input id="to" placeholder="0x…" autocomplete="off"></label>
-    <label>Amount<input id="amount" inputmode="decimal" placeholder="0.00"></label>
+    <label>Amount <a href="#" id="max" class="alt">max</a><input id="amount" inputmode="decimal" placeholder="0.00"></label>
     <label>Memo or deposit tag (if your exchange asks for one)<input id="memo" maxlength="31" placeholder="optional"></label>
     <p class="hint">The network fee (a fraction of a cent) is paid in ${esc(meta.symbol)} from this balance — there is no separate gas token on Tempo.</p>
   </div>
-  <details><summary>Where this money lives</summary><p>This account is controlled only by the passkey on your device. Claimdesk and the organizer cannot move it. To cash out, send it to an exchange that supports ${esc(meta.symbol)} on Tempo, or to any Tempo wallet.</p></details>`
+  <details><summary>Where this money lives</summary><p>This account is controlled only by the passkey on your device (synced passkeys follow your phone's account). Claimdesk and the organizer cannot move it. For larger amounts, move it to a wallet you already use, or to an exchange that accepts deposits on Tempo — Kraken has supported Tempo stablecoin deposits since June 2026 (on mainnet the award token would be one it lists, such as USDT0).</p></details>`
+  const reserve = 10n ** BigInt(meta.decimals) / 100n // keep 0.01 for the network fee, paid in the same token
+  document.getElementById('max')!.addEventListener('click', (e) => {
+    e.preventDefault()
+    ;(document.getElementById('amount') as HTMLInputElement).value = bal > reserve ? formatUnits(bal - reserve, meta.decimals) : '0'
+  })
   cta.textContent = 'Send'
   cta.disabled = false
   cta.onclick = async () => {
@@ -45,7 +51,8 @@ async function show(cfg: Config) {
     try {
       if (!isAddress(to)) throw new Error('Enter a valid 0x address.')
       const amount = parseUnits(amountText || '0', meta.decimals)
-      if (amount <= 0n || amount > bal) throw new Error('Enter an amount up to your balance.')
+      if (amount <= 0n || amount + reserve > bal) throw new Error('Enter an amount up to your balance, leaving 0.01 for the network fee.')
+      if (!confirm(`Send $${money(amount, meta.decimals)} ${meta.symbol}\nto ${to}${memoText ? `\nwith tag ${memoText}` : ''}?\n\nTransfers can't be undone. Check the address with your exchange.`)) return
       cta.disabled = true
       cta.textContent = 'Waiting for your fingerprint or face…'
       const wallet = selfPayClient(cfg, account)
@@ -55,7 +62,7 @@ async function show(cfg: Config) {
         account, chain: wallet.chain, feeToken: PATH_USD,
       } as never) as { transactionHash: Hex }
       await show(cfg)
-      app.insertAdjacentHTML('afterbegin', `<span class="chip ok">Sent · <a href="${esc(cfg.explorer)}/tx/${esc(receipt.transactionHash)}" target="_blank" rel="noopener">view</a></span>`)
+      app.insertAdjacentHTML('afterbegin', `<span class="chip ok" id="sent">Sent $${money(amount, meta.decimals)} to ${esc(to.slice(0, 6))}…${esc(to.slice(-4))}${memoText ? ` · tag ${esc(memoText)}` : ''} · <a href="${esc(cfg.explorer)}/tx/${esc(receipt.transactionHash)}" target="_blank" rel="noopener">view</a></span>`)
     } catch (e) {
       cta.disabled = false
       cta.textContent = 'Send'
