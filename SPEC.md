@@ -4,7 +4,7 @@
 Pay every winner by link: an organizer locks each award on Tempo when it announces winners; each winner opens their link once and registers a passkey account; clearing that winner's paperwork pays exactly that account in the same transaction — no gas, no seed phrase, no "send us your wallet address" email.
 
 ## 1. Success criteria (numbers) · deadline (constant) · non-goals
-- Moderato testnet, measured, each with a mined transaction hash: path A (register → clear pays) · path B (bearer claim) · refusals NotCleared / AlreadySettled (twice, after revoke) / BadClaimSignature / Expired · revoke · reclaim · batch funding in one transaction.
+- Moderato testnet, measured, each with a mined transaction hash: path A (register → clear pays) · path B (bearer claim) · refusals RecipientMismatch (forwarded link registered first) / WrongState (link reused, before clearance, twice, after revoke) / BadClaimSignature (old link after reissue, copied signature) / Expired · reissue · withholding · revoke · reclaim · batch funding in one transaction.
 - Winner pays 0 gas (fee sponsored) · link opened → money received ≤ 60 s · every payout carries a 32-byte memo that maps back to the award.
 - Receipt shows: amount, token, tx hash, block time (UTC), memo, and the amount in the winner's local currency at the block date (ECB reference rate) with the rate's source and date.
 - All tests green (contract + TypeScript) · pitch ≤ 3:00 · demo ≤ 3:00.
@@ -51,16 +51,16 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 ## 6. Acceptance criteria (Given/When/Then → tests)
 - AC-1 Given an award reference of ≤ 31 printable ASCII characters, when the memo is derived, then it is 32 bytes, deterministic and reversible; longer or non-ASCII references are rejected (they must fit the memo).
 - AC-2 Given a claim link, when parsed, then the claim key and escrow/award id round-trip; a tampered link is rejected.
-- AC-3 Given a funded but not cleared award, when claimed, then the escrow reverts `NotCleared` (contract test + Moderato).
+- AC-3 Given a funded but not cleared award, when claimed, then the escrow reverts `WrongState` (contract test + Moderato).
 - AC-4 Given a cleared award, when claimed with a valid claim-key signature for recipient R, then R receives the amount through `transferWithMemo` with the award memo, and `Claimed` is emitted.
-- AC-5 Given a claimed award, when claimed again, then it reverts `AlreadySettled`.
+- AC-5 Given a claimed award, when claimed again, then it reverts `WrongState`.
 - AC-6 Given a signature for recipient R, when someone submits it for recipient X, then it reverts `BadClaimSignature` (front-running safe).
 - AC-7 Given an expired award, when claimed, then `Expired`; when the organizer reclaims, the organizer gets the amount back with the memo; a non-organizer cannot reclaim or clear.
 - AC-8 Given a paid claim, when a receipt is built with an FX rate, then local amount = amount × rate rounded to 2 decimals, and the rate date ≤ block date.
 - AC-9 Given escrow events, when reconciled, then each award shows exactly one status consistent with the state machine.
 - AC-10 Given a winner with no funds, when they register or claim through the web page, then the fee is paid by the fee payer (winner balance before = 0, after = amount).
 - AC-11 Given a registered account, when the organizer clears naming that account, then it is paid in the clearing transaction; naming any other account reverts `RecipientMismatch`; the link cannot register again (`WrongState`); only the registered account can move it (`changeRecipient`).
-- AC-12 Given a funded award, when revoked, then the organizer is repaid now and register/claim revert; revoke after clearance reverts `AlreadyCleared`.
+- AC-12 Given a funded award, when revoked, then the organizer is repaid now and register/claim revert; revoke after clearance reverts `WrongState`.
 - AC-13 Given a forwarded link that registered first, when the organizer reissues the link, then the registration is wiped, the old key's signatures revert, and the winner registers with the new link. After clearance the organizer can neither revoke nor reissue.
 - AC-16 Given a withholding at clearance, the tax account receives it and the winner receives the rest, both with the award memo; the receipt shows gross, withheld and net.
 - AC-17 The organizer console answers only loopback requests with an allowed Host, same origin and the session token; the winner relay process never holds the organizer key.
