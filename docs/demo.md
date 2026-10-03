@@ -1,0 +1,7 @@
+# Technical demo script (≤ 3:00)
+
+1. **Contract (0:00–0:35)** — `ClaimEscrow.sol`: award = token, amount, claim-key address, expiry, status, memo (3 storage slots — Tempo charges 250k gas per new slot). `fund` pulls with `transferFromWithMemo`; `clear` stores only a paperwork hash; `claim` checks status → expiry → clearance → EIP-191 signature over (escrow, chain, award, recipient) → `transferWithMemo`; `reclaim` after expiry. `forge test`: 11 pass.
+2. **Organizer CLI (0:35–1:10)** — `deploy` (faucet + escrow + approve) → `batch examples/winners.csv` (one claim key per winner, links written to a private file) → `clear WF-DEMO-01 --paperwork …` → `status` rebuilt from events.
+3. **Winner (1:10–2:00)** — open the link at 390 px: award card, "Paperwork approved" → passkey prompt (virtual authenticator in the recording) → viem/tempo `Account.fromWebAuthnP256` signs the claim; `withRelay` sends it to our relay, which co-signs as fee payer only if every call is `claim()` into this escrow → receipt with KRW at the ECB rate.
+4. **Chain proof (2:00–2:35)** — explorer: the claim transaction's sender is the passkey account (WebAuthn signature), with a fee-payer signature; `TransferWithMemo` carries `WF-DEMO-01`. The e2e log: `NotCleared`, `AlreadySettled`, `BadClaimSignature`, `Expired`, reclaim.
+5. **Design choices (2:35–3:00)** — memo = award id (one 32-byte value for both escrow key and reconciliation) · claim key in the URL fragment (never reaches a server) · sponsorship policy as a pure function with tests · domain code has no SDK imports (tested).
