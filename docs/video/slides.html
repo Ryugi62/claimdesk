@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claimdesk — pitch</title>
+<style>
+:root{--blue:#3182F6;--ink:#191F28;--sub:#4E5968;--mute:#8B95A1;--soft:#F2F4F6;--line:#E5E8EB}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#fff;color:var(--ink);font:28px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+section{display:none;position:absolute;inset:0;padding:72px 96px 120px;flex-direction:column;justify-content:center}
+section.on{display:flex}
+.k{font-size:20px;font-weight:700;color:var(--blue);letter-spacing:.04em;text-transform:uppercase}
+h1{font-size:64px;line-height:1.1;margin:14px 0 0;font-weight:800;letter-spacing:-.02em}
+h2{font-size:46px;line-height:1.18;margin:12px 0 0;font-weight:800;letter-spacing:-.01em}
+blockquote{margin:22px 0 0;padding:22px 30px;border-left:8px solid var(--blue);background:var(--soft);border-radius:0 18px 18px 0;font-size:31px;line-height:1.4}
+cite{display:block;margin-top:14px;font-size:19px;color:var(--mute);font-style:normal}
+mark{background:#FFE8A3;padding:0 4px;border-radius:4px}
+.row{display:flex;gap:28px;margin-top:30px}
+.card{flex:1;background:var(--soft);border-radius:24px;padding:26px 28px;font-size:24px}
+.card b{display:block;font-size:30px;margin-bottom:8px}
+.big{font-size:96px;font-weight:800;color:var(--blue);letter-spacing:-.02em;line-height:1}
+ul{margin:20px 0 0;padding-left:30px}li{margin:8px 0}
+table{border-collapse:collapse;margin-top:22px;font-size:21px;width:100%}th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mute);font-size:17px;font-weight:600}
+tr.us td{font-weight:800;color:var(--blue)}
+.logo{width:120px;height:120px}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:20px;color:var(--sub)}
+.foot{position:absolute;left:96px;bottom:84px;font-size:17px;color:var(--mute)}
+</style>
+</head>
+<body>
+<section id="s1"><div class="k">The problem</div><blockquote>“The prize fulfillment process can take <mark>up to 60 days</mark> from receipt of paperwork.” … “make sure that your PayPal/Payoneer/Wise account is fully set up … or be delaying or <mark>forfeiting</mark> receipt of the prize.”<cite>Devpost Help Center — How to Claim Your Hackathon Cash Prize (updated 2026-08-21)</cite></blockquote></section>
+<section id="s2"><div class="k">This hackathon, too</div><blockquote>“Each winning team may be required to <mark>set up a wallet address</mark>, as directed by Administrator.”<cite>Crypto World’s Fair Official Rules §15(b) · §13: Prize Acceptance Documents, due diligence</cite></blockquote></section>
+<section id="s3"><div class="k">The loop every program runs by hand</div><div class="row"><div class="card"><b>Email 1</b>Tax form · identity check · acceptance</div><div class="card"><b>Email 2</b>“Please reply with your wallet address”</div><div class="card"><b>Nothing ties them</b>The person checked ≠ provably the account paid</div></div></section>
+<section id="s4"><div class="k">Founder</div><h2>Solo builder &amp; engineering student, South Korea</h2><ul><li>~a dozen global hackathons entered since August</li><li>My money home: Paddle → Payoneer ($100 minimum, no KRW) → bank</li><li>I am the person on the other end of that email</li></ul></section>
+<section id="s5" style="align-items:flex-start"><img class="logo" src="../logo.svg" alt=""><h1>Claimdesk</h1><h2 style="color:var(--sub);font-weight:700">Pay every winner by link.</h2></section>
+<section id="s9"><div class="k">The rules live in the contract</div><table><tr><th>Rule</th><th>Mined proof on Tempo testnet</th></tr><tr><td>Nothing pays before paperwork is cleared</td><td class="mono">NotCleared · 0x92b1…67b0</td></tr><tr><td>A copied link can’t redirect the money</td><td class="mono">BadClaimSignature · 0x7180…191d</td></tr><tr><td>Failed check → revoked, refunded now</td><td class="mono">revoke · 0x03a8…c259</td></tr><tr><td>Paid once, never twice</td><td class="mono">AlreadySettled · 0x5766…8e9e</td></tr><tr><td>Unclaimed awards come back</td><td class="mono">Expired · reclaim 0x6287…cb49</td></tr></table></section>
+<section id="s10"><div class="k">Why Tempo</div><div class="row"><div class="card"><b>Transfer memos</b>award id on every payout</div><div class="card"><b>Fee payer</b>winner pays no gas</div><div class="card"><b>Passkeys</b>fingerprint = account</div><div class="card"><b>Batch calls</b>fund N awards, 1 tx</div></div><p class="foot">Protocol features — no paymaster, bundler or EntryPoint.</p></section>
+<section id="s11"><div class="k">Competition</div><table><tr><th></th><th>Stranger, no wallet</th><th>Paperwork gates payout</th><th>Paperwork = paid account</th><th>Time to paid</th></tr><tr><td>Prize desks (forms + PayPal/Payoneer/Wise)</td><td>no</td><td>manual</td><td>no</td><td>up to 60 days</td></tr><tr><td>Claim links (Peanut, TipLink)</td><td>yes</td><td>no</td><td>no</td><td>instant, ungated</td></tr><tr><td>Payout platforms (Deel, Request)</td><td>onboarding</td><td>yes</td><td>yes</td><td>days</td></tr><tr class="us"><td>Claimdesk</td><td>yes — passkey</td><td>on-chain</td><td>register → clear</td><td>the clearing tx</td></tr></table></section>
+<section id="s12"><div class="k">Business</div><div class="row"><div class="card"><b>0.5% per payout</b>$5 min · $50 cap · winners pay $0<br><br>40 winners, $300k → ≈ $1,500</div><div class="card"><b>Wedge → market</b>hackathons · bounties · grants → contributors &amp; creators abroad<br><br><span class="big" style="font-size:56px">$87.5B</span><br>Payoneer 2025 volume, 120 bps take rate</div></div></section>
+<section id="s13"><div class="k">Next 30 days</div><ul><li>One real program as a pilot — testnet, then mainnet</li><li>Identity &amp; tax-form provider behind the <b>Clear</b> button</li><li>Hosted winner pages on one stable domain</li></ul><h2 style="margin-top:40px">Claimdesk — pay every winner by link.</h2></section>
+<script>
+function show(){const id=(location.hash||'#s1').slice(1);document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===id))}
+addEventListener('hashchange',show);show()
+</script>
+</body>
+</html>
