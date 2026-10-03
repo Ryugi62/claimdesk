@@ -1,0 +1,45 @@
+{
+  "base": "http://localhost:5174",
+  "authenticator": "Chromium virtual WebAuthn authenticator (CTAP2, internal, user-verified)",
+  "log": [
+    {
+      "step": "registered",
+      "ref": "WF-2026-STANDOUT-07",
+      "seconds": 2.848,
+      "account": "0xff484410fd0ac8A6B3A0bBEA275DE8e786e05035"
+    },
+    {
+      "step": "organizer-cleared",
+      "ref": "WF-2026-STANDOUT-07",
+      "tx": "0xb41f562c823afb618509a988e855a84791d9bda8cc9637e9f741a0df10a84038"
+    },
+    {
+      "step": "receipt",
+      "amount": "$15,000.00",
+      "local": "≈ 20,224,200 KRW",
+      "pdf": "docs/ui/receipt-sample.pdf",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0xb41f562c823afb618509a988e855a84791d9bda8cc9637e9f741a0df10a84038"
+    },
+    {
+      "step": "sent-from-account",
+      "seconds": 1.835,
+      "tx": "https://explore.testnet.tempo.xyz/tx/0xfb9c0314240080d6c5529a14cd84cfaf31e4c9f9e22eedee1e69f7b93c05351a",
+      "balanceAfter": "$14,987.50"
+    },
+    {
+      "step": "bearer-claim",
+      "ref": "WF-2026-PUBLICGOOD",
+      "seconds": 3.873,
+      "unit": "PathUSD received in 2.5 s · network fee paid by the organizer",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x215985d505cf59539737a202ad163ed3219f8b73eb7e7182f2497a39f4b69fd3"
+    },
+    {
+      "step": "console-1280",
+      "horizontalOverflow": false
+    },
+    {
+      "step": "console-390",
+      "horizontalOverflow": false
+    }
+  ]
+}

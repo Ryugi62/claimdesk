@@ -11,6 +11,9 @@ describe('EcbRates (contract test with a fake server)', () => {
     expect(url).toBe('https://api.frankfurter.dev/v1/2026-10-04?from=USD&to=KRW')
     expect(q).toMatchObject({ currency: 'KRW', rate: 1391.25, rateDate: '2026-10-02' })
   })
+  it('calls the default fetch unbound-safe (browsers throw "Illegal invocation" on a method-bound fetch)', () => {
+    expect(String((new EcbRates() as unknown as { fetchFn: unknown }).fetchFn)).not.toBe(String(fetch))
+  })
   it('fails loudly when the currency is missing', async () => {
     const fake = (async () => new Response(JSON.stringify({ date: '2026-10-02', rates: {} }))) as unknown as typeof fetch
     await expect(new EcbRates(fake).usdTo('XYZ', '2026-10-04')).rejects.toThrow(/XYZ/)

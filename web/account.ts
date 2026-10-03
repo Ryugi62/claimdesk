@@ -28,7 +28,7 @@ async function show(cfg: Config) {
   const client = readClient(cfg)
   const meta = await tokenMeta(client, PATH_USD)
   const bal = await balanceOf(client, PATH_USD, account.address as Hex)
-  app.innerHTML = `<div class="program">Your account · Tempo</div><div class="amount">$${money(bal, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} · ${esc(account.address)}</div>
+  app.innerHTML = `<div class="program">Your account · Tempo</div><div class="amount">$${money(bal, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} on Tempo</div><div class="addr">${esc(account.address)}</div>
   <div class="card"><div class="program">Send</div>
     <label>To (exchange deposit address or wallet)<input id="to" placeholder="0x…" autocomplete="off"></label>
     <label>Amount<input id="amount" inputmode="decimal" placeholder="0.00"></label>
