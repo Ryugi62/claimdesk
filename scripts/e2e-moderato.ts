@@ -1,133 +1,144 @@
 /**
- * Physical verification on Tempo Moderato testnet (SPEC §10).
- * deploy → fund 4 awards → claim before clearance (refused) → clear → sponsored claim (paid, winner had 0)
- * → claim again (refused) → redirected recipient (refused) → let one expire → claim (refused) → reclaim
- * → status board from chain events → receipt with the ECB rate. Writes docs/live/moderato-<ts>.json.
- *
- * Keys: testnet-only keys in .env.local (created on first run, git-ignored). No real funds anywhere.
+ * Physical verification on Tempo Moderato testnet (SPEC §10). Every refusal is a MINED transaction with a hash.
+ *  1 deploy (organizer key) · separate fee-payer key · faucet
+ *  2 fund 5 awards in ONE batched Tempo transaction
+ *  3 path A: winner registers an account (fee sponsored) → organizer clears → paid in the clearing transaction
+ *  4 path B: claim before clearance (reverts NotCleared) → clear → sponsored claim (paid) → claim again (AlreadySettled)
+ *  5 copied signature + different recipient (BadClaimSignature) · revoke → register after revoke (AlreadySettled)
+ *  6 60-second award: claim after expiry (Expired) → organizer reclaims
+ *  7 status board from events · receipt with the ECB rate
+ * Writes docs/live/moderato-<ts>.json. Keys: testnet-only, in .env.local (git-ignored).
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { tempoModerato } from 'viem/chains'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { BaseError, ContractFunctionRevertedError, keccak256, toHex } from 'viem'
+import { encodeFunctionData, decodeErrorResult, keccak256, toHex, type Account } from 'viem'
 import { Actions } from 'viem/tempo'
-import { tempoClient, deployEscrow, approve, balanceOf, TempoEscrow, viemClaimKeys, SponsoredClaimSubmitter, claimEscrowAbi } from '../src/adapters/tempoEscrow'
+import { tempoClient, deployEscrow, balanceOf, TempoEscrow, TempoWinner, viemClaimKeys, claimEscrowAbi, type TempoClient } from '../src/adapters/tempoEscrow'
 import { EcbRates } from '../src/adapters/ecbRates'
-import { createBatch, fundBatch, claimAward, statusBoard, receiptFor } from '../src/application/payouts'
+import { createBatch, fundBatch, claimAward, registerAccount, statusBoard, receiptFor } from '../src/application/payouts'
 import { parseWinners } from '../src/domain/award'
 import { parseClaimLink } from '../src/domain/claimLink'
+import { memoToRef } from '../src/domain/memo'
+import { CHAIN, EXPLORER, PATH_USD, readEnv, setEnv } from '../src/infrastructure/config'
 import type { Hex } from '../src/application/ports'
 
-const PATH_USD = '0x20c0000000000000000000000000000000000000' as Hex
-const EXPLORER = 'https://explore.testnet.tempo.xyz'
-const ENV = '.env.local'
-
-function loadOrCreateKey(name: string): Hex {
-  const env = existsSync(ENV) ? readFileSync(ENV, 'utf8') : ''
-  const m = env.match(new RegExp(`^${name}=(0x[0-9a-fA-F]{64})$`, 'm'))
-  if (m) return m[1] as Hex
-  const k = generatePrivateKey()
-  writeFileSync(ENV, env + `${name}=${k}\n`)
-  return k
+function key(name: string): Hex {
+  const k = readEnv()[name]
+  if (k) return k as Hex
+  const fresh = generatePrivateKey()
+  setEnv(name, fresh)
+  return fresh
 }
 
 const log: Record<string, unknown>[] = []
+const big = (_: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v)
 function record(step: string, data: Record<string, unknown>) {
   const row = { step, ...data }
   log.push(row)
-  console.log(JSON.stringify(row, (_, v) => (typeof v === 'bigint' ? v.toString() : v)))
+  console.log(JSON.stringify(row, big))
 }
 
-async function revertName(fn: () => Promise<unknown>): Promise<string> {
-  try {
-    await fn()
-    return 'NO_REVERT'
-  } catch (e) {
-    if (e instanceof BaseError) {
-      const r = e.walk((x) => x instanceof ContractFunctionRevertedError)
-      if (r instanceof ContractFunctionRevertedError) return r.data?.errorName ?? r.reason ?? 'reverted'
-    }
-    return `error: ${(e as Error).message.split('\n')[0]}`
+/** Sends a claim()/register() that is EXPECTED to revert, with a fixed gas limit so it is mined; returns hash + decoded error. */
+async function mustRevert(sender: TempoClient, feePayer: Account, escrow: Hex, functionName: 'claim' | 'register', args: readonly [Hex, Hex, Hex]) {
+  const data = encodeFunctionData({ abi: claimEscrowAbi, functionName, args })
+  const send = async () => {
+    const hash = (await sender.sendTransaction({ to: escrow, data, gas: 400_000n, feePayer, account: sender.account!, chain: sender.chain } as never)) as Hex
+    return (await sender.waitForTransactionReceipt({ hash })) as unknown as { transactionHash: Hex; status: string; blockNumber: bigint }
   }
+  const receipt = await send().catch(async (e) => {
+    if (!/HTTP request failed/.test(String((e as Error).message))) throw e
+    await new Promise((r) => setTimeout(r, 1500)) // public RPC hiccup (502) — one retry
+    return send()
+  })
+  let error = 'unknown'
+  try {
+    await sender.call({ account: sender.account!, to: escrow, data, blockNumber: receipt.blockNumber })
+  } catch (e) {
+    const raw = (e as { walk?: (f: (x: unknown) => boolean) => { data?: Hex } | undefined }).walk?.((x) => typeof (x as { data?: unknown }).data === 'string')?.data
+    try { error = raw ? decodeErrorResult({ abi: claimEscrowAbi, data: raw }).errorName : (e as Error).message.split('\n')[0] } catch { error = (e as Error).message.split('\n')[0] }
+  }
+  return { tx: receipt.transactionHash, status: receipt.status, error, link: `${EXPLORER}/tx/${receipt.transactionHash}` }
 }
 
 async function main() {
-  const organizer = privateKeyToAccount(loadOrCreateKey('ORGANIZER_KEY_TESTNET'))
-  const org = tempoClient(tempoModerato, organizer)
-  record('organizer', { address: organizer.address })
-
-  // testnet faucet (public RPC method, no account): organizer only — winners start at 0
-  const fundTx = await Actions.faucet.fundSync(org, { account: organizer.address })
-  record('faucet', { txs: (fundTx as unknown as { transactionHash: string }[]).map((r) => r.transactionHash) })
+  const organizer = privateKeyToAccount(key('E2E_ORGANIZER_KEY_TESTNET'))
+  const feePayer = privateKeyToAccount(key('E2E_FEE_PAYER_KEY_TESTNET'))
+  const org = tempoClient(CHAIN, organizer)
+  await Actions.faucet.fundSync(org, { account: organizer.address })
+  await Actions.faucet.fundSync(org, { account: feePayer.address })
+  record('keys', { organizer: organizer.address, feePayer: feePayer.address })
 
   const dep = await deployEscrow(org)
   record('deploy', { escrow: dep.address, tx: dep.tx.hash, link: `${EXPLORER}/address/${dep.address}` })
   const escrow = new TempoEscrow(org, dep.address, dep.block)
 
-  const max = 10n ** 30n
-  await approve(org, PATH_USD, dep.address, max)
-
-  const winners = parseWinners('ref,amount,label\nWF-DEMO-01,25,Paid after paperwork\nWF-DEMO-02,15,Waiting for paperwork\nWF-DEMO-03,10,Unclaimed\nWF-DEMO-04,5,Expires in 60s\n', 6)
-  const plan = createBatch(winners, viemClaimKeys, { baseUrl: 'http://127.0.0.1:5174', escrow: dep.address, chainId: tempoModerato.id })
+  const winners = parseWinners('ref,amount,label\nWF-E2E-A,25,registers early\nWF-E2E-B,15,bearer claim\nWF-E2E-C,10,revoked\nWF-E2E-D,5,expires in 60s\nWF-E2E-E,7,redirect attempt\n', 6)
+  const plan = createBatch(winners, viemClaimKeys, { baseUrl: 'http://localhost:5174', escrow: dep.address, chainId: CHAIN.id })
   const now = Number((await org.getBlock()).timestamp)
-  await fundBatch(plan.slice(0, 3), escrow, PATH_USD, now + 86_400)
-  const shortTx = await escrow.fund({ id: plan[3].id, token: PATH_USD, amount: plan[3].amount, expiresAt: now + 60, claimSigner: plan[3].claimSigner, memo: plan[3].memo })
-  record('fund', { awards: plan.map((p) => ({ ref: p.ref, amount: p.amount })), shortExpiryTx: shortTx.hash })
+  const long = plan.filter((p) => p.ref !== 'WF-E2E-D')
+  const fundTx = await fundBatch(long, escrow, PATH_USD, now + 86_400)
+  const fundRcpt = await org.getTransactionReceipt({ hash: fundTx.hash })
+  const shortTx = await fundBatch(plan.filter((p) => p.ref === 'WF-E2E-D'), escrow, PATH_USD, now + 60)
+  record('fund-batch', { awards: long.length, tx: fundTx.hash, gasUsed: fundRcpt.gasUsed, gasPerAward: fundRcpt.gasUsed / BigInt(long.length), shortExpiryTx: shortTx.hash })
+  const [A, B, C, D, E] = plan
 
-  // winner 1: a brand-new account with zero balance
-  const winner = privateKeyToAccount(generatePrivateKey())
-  const winnerClient = tempoClient(tempoModerato, winner)
-  const submitter = new SponsoredClaimSubmitter(winnerClient, organizer)
-  record('winner', { address: winner.address, pathUsdBefore: await balanceOf(org, PATH_USD, winner.address) })
-
-  // 1) claim before paperwork → NotCleared
-  const early = await revertName(() => claimAward(plan[0].link, winner.address, viemClaimKeys, submitter, { chainId: tempoModerato.id }))
-  record('claim-before-clearance', { ref: plan[0].ref, refusedWith: early })
-
-  // 2) organizer clears paperwork (hash of the off-chain record only)
-  const paperworkHash = keccak256(toHex(JSON.stringify({ ref: plan[0].ref, w8ben: 'received 2026-10-04', identity: 'checked', acceptance: 'signed' })))
-  const clr = await escrow.clear(plan[0].id, paperworkHash)
-  record('clear', { ref: plan[0].ref, tx: clr.hash, paperworkHash })
-
-  // 3) sponsored claim → paid
-  const t0 = Date.now()
-  const paid = await claimAward(plan[0].link, winner.address, viemClaimKeys, submitter, { chainId: tempoModerato.id })
-  const after = await balanceOf(org, PATH_USD, winner.address)
-  record('claim-paid', { ref: plan[0].ref, tx: paid.hash, link: `${EXPLORER}/tx/${paid.hash}`, ms: Date.now() - t0, winnerPathUsdAfter: after, sponsoredBy: organizer.address })
-
-  // 4) the same link again → AlreadySettled
-  const again = await revertName(() => claimAward(plan[0].link, winner.address, viemClaimKeys, submitter, { chainId: tempoModerato.id }))
-  record('claim-again', { ref: plan[0].ref, refusedWith: again })
-
-  // 5) someone copies winner 2's signature but swaps in their own address → BadClaimSignature
-  await escrow.clear(plan[1].id, keccak256(toHex(plan[1].ref)))
+  // fresh winner accounts with zero balance; fees for their transactions are paid by the fee payer
+  const winnerA = privateKeyToAccount(generatePrivateKey())
+  const winnerB = privateKeyToAccount(generatePrivateKey())
   const thief = privateKeyToAccount(generatePrivateKey())
-  const d = parseClaimLink(plan[1].link)
-  const sigForWinner = await viemClaimKeys.signClaim({ claimKey: d.claimKey as Hex, escrow: dep.address, chainId: tempoModerato.id, id: plan[1].id, recipient: winner.address })
-  const redirect = await revertName(() => winnerClient.simulateContract({ address: dep.address, abi: claimEscrowAbi, functionName: 'claim', args: [plan[1].id, thief.address, sigForWinner], account: winner }))
-  record('claim-redirected', { ref: plan[1].ref, refusedWith: redirect })
+  const cA = tempoClient(CHAIN, winnerA)
+  const cB = tempoClient(CHAIN, winnerB)
+  const sponsorOf = (c: TempoClient) => new TempoWinner(c, feePayer)
 
-  // 6) wait for the 60 s award to expire → claim refused → organizer reclaims
-  await escrow.clear(plan[3].id, keccak256(toHex(plan[3].ref)))
+  // path A — register early, paid by the clearing transaction
+  const reg = await registerAccount(A.link, winnerA.address, viemClaimKeys, sponsorOf(cA), { chainId: CHAIN.id })
+  const beforeA = await balanceOf(org, PATH_USD, winnerA.address)
+  const clrA = await escrow.clear(A.id, keccak256(toHex(JSON.stringify({ ref: A.ref, w8ben: 'received', identity: 'checked', acceptance: 'signed' }))))
+  const afterA = await balanceOf(org, PATH_USD, winnerA.address)
+  record('path-A-register-then-clear', { ref: A.ref, registerTx: reg.hash, clearTx: clrA.hash, link: `${EXPLORER}/tx/${clrA.hash}`, winnerBefore: beforeA, winnerAfter: afterA, winnerSignedNothingThatCost: true })
+
+  // path B — bearer claim
+  const dB = parseClaimLink(B.link)
+  const sigB = await viemClaimKeys.sign({ purpose: 'claim', claimKey: dB.claimKey as Hex, escrow: dep.address, chainId: CHAIN.id, id: B.id, recipient: winnerB.address })
+  record('refused-before-clearance', { ref: B.ref, ...(await mustRevert(cB, feePayer, dep.address, 'claim', [B.id, winnerB.address, sigB])) })
+  await escrow.clear(B.id, keccak256(toHex(B.ref)))
+  const t0 = Date.now()
+  const paidB = await claimAward(B.link, winnerB.address, viemClaimKeys, sponsorOf(cB), { chainId: CHAIN.id })
+  record('path-B-claim-paid', { ref: B.ref, tx: paidB.hash, link: `${EXPLORER}/tx/${paidB.hash}`, ms: Date.now() - t0, winnerAfter: await balanceOf(org, PATH_USD, winnerB.address) })
+  record('refused-claim-twice', { ref: B.ref, ...(await mustRevert(cB, feePayer, dep.address, 'claim', [B.id, winnerB.address, sigB])) })
+
+  // copied signature, different recipient
+  await escrow.clear(E.id, keccak256(toHex(E.ref)))
+  const dE = parseClaimLink(E.link)
+  const sigForWinner = await viemClaimKeys.sign({ purpose: 'claim', claimKey: dE.claimKey as Hex, escrow: dep.address, chainId: CHAIN.id, id: E.id, recipient: winnerB.address })
+  record('refused-redirect', { ref: E.ref, ...(await mustRevert(tempoClient(CHAIN, thief), feePayer, dep.address, 'claim', [E.id, thief.address, sigForWinner])) })
+
+  // revoke, then the link is dead
+  const orgBeforeRevoke = await balanceOf(org, PATH_USD, organizer.address)
+  const rev = await escrow.revoke(C.id)
+  const dC = parseClaimLink(C.link)
+  const sigC = await viemClaimKeys.sign({ purpose: 'register', claimKey: dC.claimKey as Hex, escrow: dep.address, chainId: CHAIN.id, id: C.id, recipient: winnerB.address })
+  record('revoke', { ref: C.ref, tx: rev.hash, organizerDelta: (await balanceOf(org, PATH_USD, organizer.address)) - orgBeforeRevoke })
+  record('refused-after-revoke', { ref: C.ref, ...(await mustRevert(cB, feePayer, dep.address, 'register', [C.id, winnerB.address, sigC])) })
+
+  // expiry
+  await escrow.clear(D.id, keccak256(toHex(D.ref)))
   while (Number((await org.getBlock()).timestamp) < now + 61) await new Promise((r) => setTimeout(r, 2000))
-  const late = await revertName(() => claimAward(plan[3].link, winner.address, viemClaimKeys, submitter, { chainId: tempoModerato.id }))
-  const orgBefore = await balanceOf(org, PATH_USD, organizer.address)
-  const rec = await escrow.reclaim(plan[3].id)
-  const orgAfter = await balanceOf(org, PATH_USD, organizer.address)
-  record('expired', { ref: plan[3].ref, claimRefusedWith: late, reclaimTx: rec.hash, organizerDelta: orgAfter - orgBefore })
+  const dD = parseClaimLink(D.link)
+  const sigD = await viemClaimKeys.sign({ purpose: 'claim', claimKey: dD.claimKey as Hex, escrow: dep.address, chainId: CHAIN.id, id: D.id, recipient: winnerB.address })
+  record('refused-after-expiry', { ref: D.ref, ...(await mustRevert(cB, feePayer, dep.address, 'claim', [D.id, winnerB.address, sigD])) })
+  const rec = await escrow.reclaim(D.id)
+  record('reclaim', { ref: D.ref, tx: rec.hash })
 
-  // 7) status board from the chain's own events
   const board = await statusBoard(escrow)
-  record('status-board', Object.fromEntries(Object.values(board).map((v) => [v.id, v.status])))
-
-  // 8) receipt for winner 1, local amount in KRW at the ECB rate on/before the block date
-  const receipt = await receiptFor({ ref: plan[0].ref, amount: plan[0].amount, decimals: 6, symbol: 'pathUSD', tx: paid, memo: plan[0].memo, recipient: winner.address }, new EcbRates(), 'KRW')
+  record('status-board', Object.fromEntries(Object.values(board).map((v) => [memoToRef(v.id), v.status])))
+  const receipt = await receiptFor({ ref: B.ref, amount: B.amount, decimals: 6, symbol: 'pathUSD', tx: paidB, memo: B.id, recipient: winnerB.address }, new EcbRates(), 'KRW')
   record('receipt', receipt as unknown as Record<string, unknown>)
+  record('fees', { winnersPaidFees: 0, feePayerSpent: 'see fee-payer account on explorer', feePayerExplorer: `${EXPLORER}/address/${feePayer.address}` })
 
   mkdirSync('docs/live', { recursive: true })
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const file = `docs/live/moderato-${stamp}.json`
-  writeFileSync(file, JSON.stringify({ chainId: tempoModerato.id, explorer: EXPLORER, escrow: dep.address, log }, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2))
+  const file = `docs/live/moderato-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+  writeFileSync(file, JSON.stringify({ chainId: CHAIN.id, explorer: EXPLORER, escrow: dep.address, log }, big, 2))
   console.log('written', file)
 }
 

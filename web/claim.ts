@@ -1,61 +1,26 @@
-import { createClient, http, publicActions, walletActions } from 'viem'
-import { tempoModerato } from 'viem/chains'
-import { Account, WebAuthnP256, withRelay, tempoActions } from 'viem/tempo'
+import { Account } from 'viem/tempo'
+import { generatePrivateKey } from 'viem/accounts'
+import { isAddress } from 'viem'
 import { parseClaimLink } from '../src/domain/claimLink'
-import { formatUnits } from '../src/domain/receipt'
-import { claimAward } from '../src/application/payouts'
-import { viemClaimKeys, SponsoredClaimSubmitter } from '../src/adapters/tempoEscrow'
+import { awardMemo } from '../src/domain/memo'
+import { describe as describeStatus } from '../src/domain/status'
+import { registerAccount, claimAward, receiptFor } from '../src/application/payouts'
+import { viemClaimKeys, TempoWinner, readAward, tokenMeta, escrowEvents } from '../src/adapters/tempoEscrow'
+import { EcbRates } from '../src/adapters/ecbRates'
+import { loadConfig, readClient, sponsoredClient, savedPasskey, createPasskey, signInWithPasskey, accountOf, esc, money, short, localCurrency, type Config } from './common'
+import { receiptPdf, download } from './receiptPdf'
 import type { Hex } from '../src/application/ports'
 
 const app = document.getElementById('app')!
 const cta = document.getElementById('cta') as HTMLButtonElement
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
-const money = (base: string | bigint) => Number(formatUnits(BigInt(base), 6)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const LOCAL: Record<string, string> = { ko: 'KRW', ja: 'JPY', hi: 'INR', vi: 'VND', id: 'IDR', th: 'THB', de: 'EUR', fr: 'EUR', es: 'EUR', it: 'EUR', pt: 'BRL', tr: 'TRY', pl: 'PLN', 'en-GB': 'GBP', 'en-IN': 'INR', 'en-PH': 'PHP' }
-const localCurrency = new URLSearchParams(location.search).get('currency') ?? LOCAL[navigator.language] ?? LOCAL[navigator.language.slice(0, 2)] ?? 'USD'
 
-interface Award { ref: string; status: string; amount: string; symbol: string; expiresAt: number; program: string }
-
-async function main() {
-  let link
-  try {
-    link = parseClaimLink(location.href)
-  } catch (e) {
-    app.innerHTML = `<div class="program">Claimdesk</div><h1>This link doesn't work</h1><p class="err">${esc((e as Error).message)}</p><p>Ask the organizer to send your link again.</p>`
-    return
-  }
-  const cfg = await (await fetch('/api/config')).json()
-  const award: Award = await (await fetch(`/api/award?ref=${encodeURIComponent(link.ref)}`)).json()
-  const head = `<div class="program">${esc(award.program)}</div><div class="amount">$${money(award.amount)}</div><div class="unit">${esc(award.symbol)} · award ${esc(award.ref)}</div>`
-  const how = `<details><summary>How this works</summary><p>A passkey is the fingerprint or face unlock on this device. It becomes your account on the Tempo network — no app, no seed phrase. The organizer pays the network fee, and the money only moves after they approved your paperwork.</p></details>`
-  const saved = localStorage.getItem(`claimdesk:${link.escrow}:${link.ref}`)
-  if (award.status === 'Claimed' && saved) return showReceipt(link.ref, JSON.parse(saved).tx, JSON.parse(saved).ms)
-  const state: Record<string, [string, string, string]> = {
-    Cleared: ['ok', 'Paperwork approved — ready to receive', 'is ready. Receive it in one step.'],
-    Funded: ['warn', 'The organizer is still checking your paperwork', 'is set aside for you. Come back to this link once your paperwork is approved.'],
-    Claimed: ['no', 'Already received', 'was already received with this link.'],
-    Expired: ['no', 'This award expired', 'was not received in time. Contact the organizer.'],
-    Reclaimed: ['no', 'Returned to the organizer', 'expired and went back to the organizer.'],
-    None: ['no', 'Award not found', 'could not be found. Check the link with the organizer.'],
-  }
-  const [tone, chip, line] = state[award.status] ?? state.None
-  app.innerHTML = `${head}<span class="chip ${tone}">${chip}</span><p>Your award ${line}</p>${how}`
-  if (award.status !== 'Cleared') return
-  cta.disabled = false
+function button(label: string, onClick: () => Promise<void>, enabled = true) {
+  cta.textContent = label
+  cta.disabled = !enabled
   cta.onclick = async () => {
     cta.disabled = true
-    cta.textContent = 'Waiting for your fingerprint or face…'
     try {
-      const credential = await WebAuthnP256.createCredential({ label: `Claimdesk ${award.ref}` } as never)
-      const account = Account.fromWebAuthnP256(credential)
-      localStorage.setItem(`claimdesk:passkey:${credential.id}`, credential.publicKey)
-      cta.textContent = 'Receiving…'
-      const client = createClient({ chain: tempoModerato, account, transport: withRelay(http(cfg.rpc), http('/relay')) }).extend(publicActions).extend(walletActions).extend(tempoActions())
-      const t0 = performance.now()
-      const tx = await claimAward(location.href, account.address as Hex, viemClaimKeys, new SponsoredClaimSubmitter(client as never, true), { chainId: cfg.chainId })
-      const ms = Math.round(performance.now() - t0)
-      localStorage.setItem(`claimdesk:${link.escrow}:${link.ref}`, JSON.stringify({ tx: tx.hash, ms, account: account.address }))
-      await showReceipt(link.ref, tx.hash, ms)
+      await onClick()
     } catch (e) {
       cta.disabled = false
       cta.textContent = 'Try again'
@@ -64,29 +29,119 @@ async function main() {
   }
 }
 
-async function showReceipt(ref: string, tx: string, ms?: number) {
-  const r = await (await fetch(`/api/receipt?ref=${encodeURIComponent(ref)}&tx=${tx}&currency=${localCurrency}`)).json()
-  const local = r.local ? `<div class="local">≈ ${esc(r.local.amountText)} ${esc(r.local.currency)}</div><p>at the ECB reference rate of ${esc(r.local.rateDate)} (1 USD = ${Number(r.local.rate).toLocaleString('en-US')} ${esc(r.local.currency)})</p>` : ''
-  app.innerHTML = `<div class="program">${esc(r.program)}</div><div class="amount">$${esc(r.amountText)}</div><div class="unit">${esc(r.symbol)} received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
-  <span class="chip ok">Received</span>
-  ${r.local ? `<div class="card"><div class="program">For your records</div>${local}</div>` : ''}
-  <details><summary>Receipt details</summary><dl>
-    <dt>Award</dt><dd>${esc(r.memoText)}</dd>
-    <dt>Time (UTC)</dt><dd>${esc(r.blockTimeUtc)}</dd>
-    <dt>Your account</dt><dd>${esc(r.recipient)}</dd>
-    <dt>Transaction</dt><dd><a href="${esc(r.explorer)}" target="_blank" rel="noopener">${esc(r.txHash)}</a></dd>
-    <dt>Memo</dt><dd>${esc(r.memo)}</dd>
-    ${r.local ? `<dt>Rate source</dt><dd>${esc(r.local.source)}</dd>` : ''}
-  </dl></details>`
-  cta.disabled = false
-  cta.textContent = 'Download receipt'
-  cta.onclick = () => {
-    const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `receipt-${r.memoText}.json`
-    a.click()
+async function main() {
+  let link
+  try {
+    link = parseClaimLink(location.href)
+  } catch (e) {
+    app.innerHTML = `<div class="program">Claimdesk</div><h1>This link doesn't work</h1><p class="err">${esc((e as Error).message)}</p><p>Ask the organizer to send your link again.</p>`
+    cta.style.display = 'none'
+    return
   }
+  const cfg = await loadConfig()
+  if (cfg.chainId !== link.chainId) throw new Error(`This page serves chain ${cfg.chainId}; the link is for chain ${link.chainId}.`)
+  await render(cfg, link.escrow as Hex, link.ref)
 }
 
-main().catch((e) => { app.innerHTML = `<p class="err">${esc((e as Error).message)}</p>` })
+async function render(cfg: Config, escrow: Hex, ref: string) {
+  const client = readClient(cfg)
+  const id = awardMemo(ref)
+  const award = await readAward(client, escrow, id)
+  if (award.status === 'None') {
+    app.innerHTML = `<div class="program">${esc(cfg.program)}</div><h1>Award not found</h1><p>Check the link with the organizer.</p>`
+    cta.style.display = 'none'
+    return
+  }
+  const meta = await tokenMeta(client, award.token)
+  const registered = award.recipient !== '0x0000000000000000000000000000000000000000' ? award.recipient : undefined
+  const mine = savedPasskey()
+  const myAddress = mine ? accountOf(mine).address : undefined
+  const isMine = (a?: string) => !!a && !!myAddress && a.toLowerCase() === myAddress.toLowerCase()
+  const head = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${money(award.amount, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} · award ${esc(ref)}</div>`
+  const d = describeStatus({ status: award.status === 'Funded' || award.status === 'Cleared' || award.status === 'Claimed' || award.status === 'Expired' || award.status === 'Reclaimed' || award.status === 'Revoked' ? award.status : 'Inconsistent', registered })
+  const chip = { Funded: registered ? 'Account ready' : 'Waiting for paperwork', Cleared: 'Paperwork approved', Claimed: 'Paid', Expired: 'Expired', Reclaimed: 'Returned', Revoked: 'Cancelled' }[award.status as string] ?? 'Check with the organizer'
+  const how = `<details><summary>How this works</summary><p>A passkey is the fingerprint or face unlock on this device. It becomes your account on the Tempo network — no app, no seed phrase. The organizer pays the network fee. The money is already locked for you, and it moves only after the organizer approves your paperwork.</p></details>`
+  const expires = `<p>Set aside until ${esc(new Date(award.expiresAt * 1000).toUTCString().replace(/:\d\d GMT/, ' UTC'))}.</p>`
+
+  if (award.status === 'Claimed') {
+    const events = await escrowEvents(client, escrow, BigInt(cfg.escrows?.[escrow.toLowerCase()] ?? 0), id).catch(() => [])
+    const paid = events.find((e) => e.kind === 'Claimed')
+    if (paid && paid.kind === 'Claimed' && isMine(paid.recipient)) return showReceipt(cfg, escrow, ref, paid.txHash as Hex, paid.recipient as Hex, award.amount, meta)
+    app.innerHTML = `${head}<span class="chip ok">${chip}</span><p>This award was paid to ${esc(short(paid && paid.kind === 'Claimed' ? paid.recipient : registered ?? ''))}.</p><p>On the device that received it, open <a href="account">your account</a>.</p>`
+    cta.style.display = 'none'
+    return
+  }
+  app.innerHTML = `${head}<span class="chip ${d.tone}">${chip}</span><p>${esc(d.winner)}</p>${award.status === 'Funded' || award.status === 'Cleared' ? expires : ''}${how}`
+
+  const getAccount = async () => accountOf(savedPasskey() ?? (await createPasskey(`Claimdesk ${ref}`)))
+  if (award.status === 'Funded' && !registered) {
+    app.insertAdjacentHTML('beforeend', `<p class="alt"><a href="#" id="existing">I already have an address</a>${mine ? '' : ' · <a href="#" id="signin">Use a passkey I made before</a>'}</p>`)
+    document.getElementById('signin')?.addEventListener('click', async (e) => { e.preventDefault(); await signInWithPasskey(); await render(cfg, escrow, ref) })
+    document.getElementById('existing')!.addEventListener('click', async (e) => {
+      e.preventDefault()
+      const to = prompt('Your Tempo or EVM address (0x…). The award will be paid there when your paperwork is approved.')?.trim()
+      if (!to) return
+      if (!isAddress(to)) return alert('That is not an address.')
+      cta.disabled = true
+      const sender = Account.fromSecp256k1(generatePrivateKey()) // throwaway sender; the claim key decides, the sponsor pays
+      await registerAccount(location.href, to as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, sender) as never, true), { chainId: cfg.chainId })
+      await render(cfg, escrow, ref)
+    })
+    button(mine ? 'Use my account' : 'Create my account', async () => {
+      cta.textContent = 'Waiting for your fingerprint or face…'
+      const account = await getAccount()
+      cta.textContent = 'Saving…'
+      await registerAccount(location.href, account.address as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, account) as never, true), { chainId: cfg.chainId })
+      await render(cfg, escrow, ref)
+    })
+    return
+  }
+  if (award.status === 'Funded' && registered) {
+    app.insertAdjacentHTML('beforeend', `<div class="card"><div class="program">Your account</div><div class="addr">${esc(registered)}</div><p>If the organizer asks for your address, this is it.</p></div>`)
+    if (isMine(registered)) button('Open my account', async () => { location.href = 'account' })
+    else cta.style.display = 'none'
+    return
+  }
+  if (award.status === 'Cleared') {
+    button(mine ? 'Receive to my account' : 'Receive with a passkey', async () => {
+      cta.textContent = 'Waiting for your fingerprint or face…'
+      const account = await getAccount()
+      cta.textContent = 'Receiving…'
+      const t0 = performance.now()
+      const tx = await claimAward(location.href, account.address as Hex, viemClaimKeys, new TempoWinner(sponsoredClient(cfg, account) as never, true), { chainId: cfg.chainId })
+      await showReceipt(cfg, escrow, ref, tx.hash, account.address as Hex, award.amount, meta, Math.round(performance.now() - t0))
+    })
+    return
+  }
+  cta.style.display = 'none'
+}
+
+async function showReceipt(cfg: Config, escrow: Hex, ref: string, txHash: Hex, recipient: Hex, amount: bigint, meta: { symbol: string; decimals: number }, ms?: number) {
+  const client = readClient(cfg)
+  const r = await client.getTransactionReceipt({ hash: txHash })
+  const block = await client.getBlock({ blockNumber: r.blockNumber })
+  const receipt = await receiptFor({ ref, amount, decimals: meta.decimals, symbol: meta.symbol, tx: { hash: txHash, blockTime: new Date(Number(block.timestamp) * 1000) }, memo: awardMemo(ref), recipient }, new EcbRates(), localCurrency())
+  const explorerUrl = `${cfg.explorer}/tx/${txHash}`
+  const local = receipt.local ? `<div class="card"><div class="program">For your records</div><div class="local">≈ ${esc(receipt.local.amountText)} ${esc(receipt.local.currency)}</div><p>at the ECB reference rate of ${esc(receipt.local.rateDate)} (1 USD = ${Number(receipt.local.rate).toLocaleString('en-US')} ${esc(receipt.local.currency)})</p></div>` : ''
+  app.innerHTML = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${esc(receipt.amountText)}</div><div class="unit">${esc(receipt.symbol)} received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
+  <span class="chip ok">Received</span>${local}
+  <p class="alt"><a href="account">Open my account</a> — send it to an exchange or another wallet.</p>
+  <details><summary>Receipt details</summary><dl>
+    <dt>Award</dt><dd>${esc(receipt.memoText)}</dd>
+    <dt>Time (UTC)</dt><dd>${esc(receipt.blockTimeUtc)}</dd>
+    <dt>Your account</dt><dd>${esc(receipt.recipient)}</dd>
+    <dt>Transaction</dt><dd><a href="${esc(explorerUrl)}" target="_blank" rel="noopener">${esc(receipt.txHash)}</a></dd>
+    <dt>Memo</dt><dd>${esc(receipt.memo)}</dd>
+    ${receipt.local ? `<dt>Rate source</dt><dd>${esc(receipt.local.source)}. 1 ${esc(receipt.symbol)} is treated as 1 USD.</dd>` : ''}
+  </dl></details>`
+  button('Download receipt (PDF)', async () => {
+    const organizer = (await client.readContract({ address: escrow, abi: [{ type: 'function', name: 'organizer', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }] as const, functionName: 'organizer' })) as string
+    download(await receiptPdf(receipt, { program: cfg.program, organizer, explorerUrl, chain: `Tempo (chain ${cfg.chainId})` }), `receipt-${receipt.memoText}.pdf`)
+    cta.disabled = false
+    cta.textContent = 'Download receipt (PDF)'
+  })
+}
+
+main().catch((e) => {
+  app.innerHTML = `<p class="err">${esc((e as Error).message.split('\n')[0])}</p>`
+})

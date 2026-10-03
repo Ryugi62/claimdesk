@@ -1,0 +1,127 @@
+{
+  "chainId": 42431,
+  "explorer": "https://explore.testnet.tempo.xyz",
+  "escrow": "0xad0fb5cff78f53fded52a3933195dda2f82b77b5",
+  "log": [
+    {
+      "step": "keys",
+      "organizer": "0x45632a6cD407240e1E789297070EF989F80cC5dA",
+      "feePayer": "0x5434a20Ff8850729821cd03792E3faE9b99D562f"
+    },
+    {
+      "step": "deploy",
+      "escrow": "0xad0fb5cff78f53fded52a3933195dda2f82b77b5",
+      "tx": "0x539add0779041467e738b5d3a47b5e941b680fa3e5bcbb2839d12bf86f3be720",
+      "link": "https://explore.testnet.tempo.xyz/address/0xad0fb5cff78f53fded52a3933195dda2f82b77b5"
+    },
+    {
+      "step": "fund-batch",
+      "awards": 4,
+      "tx": "0xdbfb5377640bc497db8fb3c680cc4cc83f9e7f8c049403138922066d806bc6e7",
+      "gasUsed": "2126242",
+      "gasPerAward": "531560",
+      "shortExpiryTx": "0x99bfee2fe8f50dd10890abf2451cb5aac456a9ff993efe1e1810419baefc61fe"
+    },
+    {
+      "step": "path-A-register-then-clear",
+      "ref": "WF-E2E-A",
+      "registerTx": "0x21d3032d4b2a062582b5c465678c4a579dc808ea1a4c3dfdf5b475ec94c40fd9",
+      "clearTx": "0x72ecfd5c3562a80e75883f9aa8cce8de3acb093ee8141cab0a58c2d9ae1319bc",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x72ecfd5c3562a80e75883f9aa8cce8de3acb093ee8141cab0a58c2d9ae1319bc",
+      "winnerBefore": "0",
+      "winnerAfter": "25000000",
+      "winnerSignedNothingThatCost": true
+    },
+    {
+      "step": "refused-before-clearance",
+      "ref": "WF-E2E-B",
+      "tx": "0x92b1094eaeae52755cddf1ab0751bf245b8a874ded433afaaa5649754e1567b0",
+      "status": "reverted",
+      "error": "NotCleared",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x92b1094eaeae52755cddf1ab0751bf245b8a874ded433afaaa5649754e1567b0"
+    },
+    {
+      "step": "path-B-claim-paid",
+      "ref": "WF-E2E-B",
+      "tx": "0xb5b42d7443d5b08775775e1a10ea16934212b645008b97eb3f35ddeae4000185",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xb5b42d7443d5b08775775e1a10ea16934212b645008b97eb3f35ddeae4000185",
+      "ms": 1664,
+      "winnerAfter": "15000000"
+    },
+    {
+      "step": "refused-claim-twice",
+      "ref": "WF-E2E-B",
+      "tx": "0x5766a4e671d2acb8fc2bae594428998a0d54ae0dc87099a189b22af4ca23cb8e",
+      "status": "reverted",
+      "error": "AlreadySettled",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x5766a4e671d2acb8fc2bae594428998a0d54ae0dc87099a189b22af4ca23cb8e"
+    },
+    {
+      "step": "refused-redirect",
+      "ref": "WF-E2E-E",
+      "tx": "0x7180533b62b084a3526f3528f4660d0a2a928e62ccf17e7b86654d098369191d",
+      "status": "reverted",
+      "error": "BadClaimSignature",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x7180533b62b084a3526f3528f4660d0a2a928e62ccf17e7b86654d098369191d"
+    },
+    {
+      "step": "revoke",
+      "ref": "WF-E2E-C",
+      "tx": "0x03a862fc5e1b8df3ff02e85d102be7b55ce63f5bae603551702c4149ae6cc259",
+      "organizerDelta": "9999972"
+    },
+    {
+      "step": "refused-after-revoke",
+      "ref": "WF-E2E-C",
+      "tx": "0x5585647c7549b755fb8b08a688d7aac158913078e5fee4d2658d396041289d84",
+      "status": "reverted",
+      "error": "AlreadySettled",
+      "link": "https://explore.testnet.tempo.xyz/tx/0x5585647c7549b755fb8b08a688d7aac158913078e5fee4d2658d396041289d84"
+    },
+    {
+      "step": "refused-after-expiry",
+      "ref": "WF-E2E-D",
+      "tx": "0xe3ccf2c3c91baca6f8fe89f44232464340ea77afd3e4ff74a4a56a7266251269",
+      "status": "reverted",
+      "error": "Expired",
+      "link": "https://explore.testnet.tempo.xyz/tx/0xe3ccf2c3c91baca6f8fe89f44232464340ea77afd3e4ff74a4a56a7266251269"
+    },
+    {
+      "step": "reclaim",
+      "ref": "WF-E2E-D",
+      "tx": "0x628731edf73f56fae51f4ce7f1798553c43b1b6a2a307c2834e33152e0e6cb49"
+    },
+    {
+      "step": "status-board",
+      "WF-E2E-A": "Claimed",
+      "WF-E2E-B": "Claimed",
+      "WF-E2E-C": "Revoked",
+      "WF-E2E-E": "Cleared",
+      "WF-E2E-D": "Reclaimed"
+    },
+    {
+      "step": "receipt",
+      "ref": "WF-E2E-B",
+      "amountText": "15.00",
+      "symbol": "pathUSD",
+      "txHash": "0xb5b42d7443d5b08775775e1a10ea16934212b645008b97eb3f35ddeae4000185",
+      "blockTimeUtc": "2026-10-03T22:36:19.000Z",
+      "memo": "0x57462d4532452d42000000000000000000000000000000000000000000000000",
+      "memoText": "WF-E2E-B",
+      "recipient": "0x4c5666d7A4cF1817F4F652592Ad00A00e49093e0",
+      "local": {
+        "currency": "KRW",
+        "rate": 1348.28,
+        "rateDate": "2026-10-02",
+        "source": "ECB euro foreign exchange reference rates (via frankfurter.app)",
+        "amountText": "20,224"
+      }
+    },
+    {
+      "step": "fees",
+      "winnersPaidFees": 0,
+      "feePayerSpent": "see fee-payer account on explorer",
+      "feePayerExplorer": "https://explore.testnet.tempo.xyz/address/0x5434a20Ff8850729821cd03792E3faE9b99D562f"
+    }
+  ]
+}

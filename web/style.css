@@ -24,3 +24,9 @@ a{color:var(--blue)}
 .err{color:var(--no);font-size:15px;margin-top:16px}
 table{width:100%;border-collapse:collapse;font-size:14px;margin-top:16px}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}th{color:var(--mute);font-weight:600;font-size:13px}
 .num{text-align:right;font-variant-numeric:tabular-nums}
+.alt{font-size:14px}
+.addr{font:600 14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all;margin-top:6px;color:var(--ink)}
+label{display:block;font-size:13px;color:var(--mute);margin-top:14px}
+input{display:block;width:100%;margin-top:6px;height:48px;border:1px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;background:var(--bg);color:var(--ink)}
+input:focus{outline:2px solid var(--blue);border-color:transparent}
+.hint{font-size:13px}

@@ -3,7 +3,7 @@ import type { FxQuote } from '../domain/receipt'
 
 /** ECB reference rates via frankfurter.app (free, no key). Returns the latest publication on or before the date. */
 export class EcbRates implements FxRates {
-  constructor(private fetchFn: typeof fetch = fetch, private base = 'https://api.frankfurter.app') {}
+  constructor(private fetchFn: typeof fetch = fetch, private base = 'https://api.frankfurter.dev/v1') {}
   async usdTo(currency: string, onOrBefore: string): Promise<FxQuote> {
     const res = await this.fetchFn(`${this.base}/${onOrBefore}?from=USD&to=${encodeURIComponent(currency)}`)
     if (!res.ok) throw new Error(`rate lookup failed: HTTP ${res.status}`)

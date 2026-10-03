@@ -4,31 +4,55 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Payout batch · Claimdesk</title>
-<style>/*css*/ main{max-width:880px}</style>
+<style>/*css*/ main{max-width:920px} td button{height:36px;border:0;border-radius:10px;padding:0 12px;font-weight:600;cursor:pointer;background:var(--blue);color:#fff;font-size:13px} td button.ghost{background:var(--soft);color:var(--sub);margin-left:6px} .toolbar{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px} .toolbar a{font-size:14px} @media (max-width:640px){th:nth-child(4),td:nth-child(4){display:none}}</style>
 </head>
 <body>
 <main>
   <div class="program" id="program">Claimdesk</div>
   <h1>Who has been paid</h1>
   <div class="amount" id="paid">—</div>
-  <div class="unit" id="paidline">loading from the chain…</div>
-  <div class="card"><table><thead><tr><th>Award</th><th>Status</th><th class="num">Amount</th><th>Paid to</th></tr></thead><tbody id="rows"></tbody></table></div>
-  <details><summary>Where these numbers come from</summary><p>Every row is rebuilt from the escrow contract's own events (Funded, Cleared, Claimed, Reclaimed) on Tempo — not from a database. Each payout carries the award reference as its 32-byte transfer memo.</p><p id="escrow"></p></details>
+  <div class="unit" id="paidline">reading the chain…</div>
+  <div class="toolbar"><a href="/api/links.csv">Export claim links for mail merge (CSV)</a></div>
+  <div class="card"><table><thead><tr><th>Award</th><th>Status</th><th class="num">Amount</th><th>Account</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+  <details><summary>Where these numbers come from</summary><p>Every row is rebuilt from the escrow contract's own events (Funded, Registered, Cleared, Claimed, Revoked, Reclaimed) on Tempo — not from a database. Each payout carries the award reference as its 32-byte transfer memo. Clearing paperwork stores only a hash of your record on-chain.</p><p id="escrow"></p></details>
 </main>
 <script type="module">
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 const fmt = (b) => (Number(BigInt(b)) / 1e6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-const tone = { Claimed: 'ok', Cleared: 'ok', Funded: 'warn', Expired: 'no', Reclaimed: 'no', Inconsistent: 'no' }
-const label = { Claimed: 'Paid', Cleared: 'Paperwork approved', Funded: 'Waiting for paperwork', Expired: 'Expired', Reclaimed: 'Returned to organizer', Inconsistent: 'Check history' }
-const cfg = await (await fetch('/api/config')).json()
-const rows = await (await fetch('/api/status')).json()
-document.getElementById('program').textContent = cfg.program
-const paid = rows.filter((r) => r.status === 'Claimed')
-const total = rows.reduce((n, r) => n + BigInt(r.amount ?? 0), 0n)
-document.getElementById('paid').textContent = `${paid.length} of ${rows.length}`
-document.getElementById('paidline').textContent = `winners paid · $${fmt(paid.reduce((n, r) => n + BigInt(r.amount ?? 0), 0n))} of $${fmt(total)}`
-document.getElementById('rows').innerHTML = rows.map((r) => `<tr><td>${esc(r.ref)}</td><td><span class="chip ${tone[r.status]}" style="margin:0">${label[r.status]}</span></td><td class="num">$${fmt(r.amount ?? 0)}</td><td>${r.recipient ? `<a href="${cfg.explorer}/tx/${r.txs.Claimed}" target="_blank" rel="noopener">${esc(r.recipient.slice(0, 6) + '…' + r.recipient.slice(-4))}</a>` : '—'}</td></tr>`).join('')
-document.getElementById('escrow').innerHTML = `Escrow <a href="${cfg.explorer}/address/${cfg.escrow}" target="_blank" rel="noopener">${esc(cfg.escrow)}</a> on chain ${cfg.chainId}.`
+const short = (a) => a.slice(0, 6) + '…' + a.slice(-4)
+async function load() {
+  const s = await (await fetch('/api/status')).json()
+  document.getElementById('program').textContent = s.program
+  const rows = s.rows
+  const paid = rows.filter((r) => r.status === 'Claimed')
+  const live = rows.filter((r) => !['Revoked', 'Reclaimed'].includes(r.status))
+  const total = live.reduce((n, r) => n + BigInt(r.amount ?? 0), 0n)
+  document.getElementById('paid').textContent = `${paid.length} of ${live.length}`
+  document.getElementById('paidline').textContent = `winners paid · $${fmt(paid.reduce((n, r) => n + BigInt(r.amount ?? 0), 0n))} of $${fmt(total)}`
+  document.getElementById('rows').innerHTML = rows.map((r) => {
+    const acct = r.recipient ?? r.registered
+    const link = r.recipient ? `<a href="${s.explorer}/tx/${r.txs.Claimed}" target="_blank" rel="noopener">${esc(short(r.recipient))}</a>` : acct ? esc(short(acct)) : '—'
+    const act = r.status === 'Funded' ? `<button data-clear="${esc(r.ref)}">Clear paperwork</button><button class="ghost" data-revoke="${esc(r.ref)}">Revoke</button>` : ''
+    return `<tr><td>${esc(r.ref)}</td><td><span class="chip ${r.tone}" style="margin:0">${esc(r.says)}</span></td><td class="num">$${fmt(r.amount ?? 0)}</td><td>${link}</td><td>${act}</td></tr>`
+  }).join('')
+  document.getElementById('escrow').innerHTML = `Escrow <a href="${s.explorer}/address/${s.escrow}" target="_blank" rel="noopener">${esc(s.escrow)}</a> on chain ${s.chainId}.`
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('button')
+  if (!b) return
+  if (b.dataset.clear) {
+    const paperwork = prompt(`What did you collect for ${b.dataset.clear}? (stays on your machine; only its hash goes on-chain)`, 'W-8BEN received, identity checked, prize acceptance signed')
+    if (paperwork === null) return
+    b.disabled = true; b.textContent = 'Clearing…'
+    await fetch('/api/clear', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref: b.dataset.clear, paperwork }) })
+  } else if (b.dataset.revoke) {
+    if (!confirm(`Revoke ${b.dataset.revoke}? The money returns to you now and the link stops working.`)) return
+    b.disabled = true; b.textContent = 'Revoking…'
+    await fetch('/api/revoke', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ref: b.dataset.revoke }) })
+  }
+  await load()
+})
+load()
 </script>
 </body>
 </html>

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { awardMemo, memoToRef } from '../src/domain/memo'
 import { encodeClaimLink, parseClaimLink } from '../src/domain/claimLink'
 import { parseWinners } from '../src/domain/award'
-import { reconcile } from '../src/domain/status'
+import { reconcile, describe as describeStatus } from '../src/domain/status'
 import { buildReceipt, formatUnits } from '../src/domain/receipt'
 
 const ESCROW = '0x1111111111111111111111111111111111111111'
@@ -62,9 +62,27 @@ describe('AC-9 reconcile', () => {
     expect(claimed.recipient).toBe('0xabc')
     expect(reconcile([...base, { kind: 'Reclaimed' as const, id: memo }], 150)[memo].status).toBe('Reclaimed')
   })
+  it('registration keeps Funded and remembers the account; clearance then pays it', () => {
+    const ev = [{ kind: 'Funded' as const, id: memo, amount: 5n, expiresAt: 100 }, { kind: 'Registered' as const, id: memo, recipient: '0xw' }]
+    expect(reconcile(ev, 10)[memo]).toMatchObject({ status: 'Funded', registered: '0xw' })
+    const paid = reconcile([...ev, { kind: 'Cleared' as const, id: memo }, { kind: 'Claimed' as const, id: memo, recipient: '0xw' }], 10)[memo]
+    expect(paid).toMatchObject({ status: 'Claimed', recipient: '0xw' })
+  })
+  it('revoke is final and only before clearance', () => {
+    const f = { kind: 'Funded' as const, id: memo, amount: 5n, expiresAt: 100 }
+    expect(reconcile([f, { kind: 'Revoked' as const, id: memo }], 200)[memo].status).toBe('Revoked')
+    expect(reconcile([f, { kind: 'Cleared' as const, id: memo }, { kind: 'Revoked' as const, id: memo }], 10)[memo].status).toBe('Inconsistent')
+  })
   it('flags impossible histories instead of hiding them', () => {
     const r = reconcile([{ kind: 'Claimed' as const, id: memo, recipient: '0xabc' }], 0)[memo]
     expect(r.status).toBe('Inconsistent')
+  })
+})
+
+describe('status copy', () => {
+  it('tells a registered winner they will be paid automatically', () => {
+    expect(describeStatus({ status: 'Funded', registered: '0xw' }).winner).toMatch(/automatically/)
+    expect(describeStatus({ status: 'Funded' }).winner).toMatch(/Create your account/)
   })
 })
 

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#3182F6"/>
+  <!-- a link that becomes a check: the claim -->
+  <path d="M150 268 l70 70 l142 -164" fill="none" stroke="#fff" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="362" cy="174" r="34" fill="#fff"/>
+  <circle cx="362" cy="174" r="14" fill="#3182F6"/>
+</svg>

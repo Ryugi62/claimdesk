@@ -1,105 +1,161 @@
-import { createClient, http, publicActions, walletActions, encodeAbiParameters, keccak256, parseEventLogs, type Account, type Chain } from 'viem'
+import { createClient, http, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoActions } from 'viem/tempo'
 import { claimEscrowAbi, claimEscrowBytecode } from './claimEscrowArtifact'
-import type { ClaimKeys, ClaimSubmitter, EscrowGateway, Hex, NewAward, TxRef } from '../application/ports'
+import type { ClaimKeys, EscrowGateway, Hex, NewAward, TxRef, WinnerGateway } from '../application/ports'
 import type { EscrowEvent } from '../domain/status'
 
-export function tempoClient(chain: Chain, account?: Account, rpcUrl?: string) {
-  return createClient({ chain, transport: http(rpcUrl), account }).extend(publicActions).extend(walletActions).extend(tempoActions())
+export function tempoClient(chain: Chain, account?: Account, transport?: Transport) {
+  return createClient({ chain, transport: transport ?? http(undefined, { retryCount: 6, retryDelay: 1200 }), account }).extend(publicActions).extend(walletActions).extend(tempoActions())
 }
-type Client = ReturnType<typeof tempoClient>
+export type TempoClient = ReturnType<typeof tempoClient>
 
-async function txRef(client: Client, receipt: { transactionHash: Hex; blockNumber: bigint; status: string }): Promise<TxRef> {
+export const STATUS = ['None', 'Funded', 'Cleared', 'Claimed', 'Expired', 'Reclaimed', 'Revoked'] as const
+
+export async function txRef(client: TempoClient, receipt: { transactionHash: Hex; blockNumber: bigint; status: string }): Promise<TxRef> {
   if (receipt.status !== 'success') throw new Error(`transaction ${receipt.transactionHash} reverted`)
   const block = await client.getBlock({ blockNumber: receipt.blockNumber })
   return { hash: receipt.transactionHash, blockTime: new Date(Number(block.timestamp) * 1000) }
 }
 
-/** Deploys a new ClaimEscrow owned by the client's account. */
-export async function deployEscrow(client: Client): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
-  const hash = await client.deployContract({ abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex, account: client.account!, chain: client.chain })
+/** Deploys a new ClaimEscrow; `organizer` becomes its owner (defaults to the deployer). */
+export async function deployEscrow(client: TempoClient, organizer?: Hex): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
+  const hash = await client.deployContract({ abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex, args: [organizer ?? client.account!.address], account: client.account!, chain: client.chain })
   const receipt = await client.waitForTransactionReceipt({ hash })
   if (!receipt.contractAddress) throw new Error('deploy failed')
   return { address: receipt.contractAddress as Hex, tx: await txRef(client, receipt as never), block: receipt.blockNumber }
 }
 
-const tip20Abi = [
+export const tip20Abi = [
   { type: 'function', name: 'approve', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ type: 'bool' }] },
   { type: 'function', name: 'balanceOf', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }] },
+  { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
+  { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
+  { type: 'function', name: 'transferWithMemo', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'amount', type: 'uint256' }, { name: 'memo', type: 'bytes32' }], outputs: [] },
 ] as const
 
-export async function approve(client: Client, token: Hex, spender: Hex, amount: bigint): Promise<TxRef> {
-  const hash = await client.writeContract({ address: token, abi: tip20Abi, functionName: 'approve', args: [spender, amount], account: client.account!, chain: client.chain })
-  return txRef(client, (await client.waitForTransactionReceipt({ hash })) as never)
-}
-
-export async function balanceOf(client: Client, token: Hex, who: Hex): Promise<bigint> {
+export async function balanceOf(client: TempoClient, token: Hex, who: Hex): Promise<bigint> {
   return client.readContract({ address: token, abi: tip20Abi, functionName: 'balanceOf', args: [who] })
 }
 
-/** Organizer's view of its escrow (organizer key signs fund/clear/reclaim). */
-export class TempoEscrow implements EscrowGateway {
-  constructor(private client: Client, readonly address: Hex, private fromBlock: bigint) {}
-  get chainId() { return this.client.chain!.id }
+export async function tokenMeta(client: TempoClient, token: Hex): Promise<{ symbol: string; decimals: number }> {
+  const [symbol, decimals] = await Promise.all([
+    client.readContract({ address: token, abi: tip20Abi, functionName: 'symbol' }),
+    client.readContract({ address: token, abi: tip20Abi, functionName: 'decimals' }),
+  ])
+  return { symbol, decimals: Number(decimals) }
+}
 
-  private async write(functionName: 'fund' | 'clear' | 'reclaim', args: readonly unknown[]): Promise<TxRef> {
-    const hash = await this.client.writeContract({ address: this.address, abi: claimEscrowAbi, functionName, args: args as never, account: this.client.account!, chain: this.client.chain })
-    return txRef(this.client, (await this.client.waitForTransactionReceipt({ hash })) as never)
-  }
-  fund(a: NewAward) { return this.write('fund', [a.id, a.token, a.amount, BigInt(a.expiresAt), a.claimSigner, a.memo]) }
-  clear(id: Hex, paperworkHash: Hex) { return this.write('clear', [id, paperworkHash]) }
-  reclaim(id: Hex) { return this.write('reclaim', [id]) }
+export interface OnchainAward {
+  token: Hex
+  amount: bigint
+  claimSigner: Hex
+  expiresAt: number
+  recipient: Hex
+  status: (typeof STATUS)[number]
+}
 
-  async statusOf(id: Hex): Promise<number> {
-    return Number(await this.client.readContract({ address: this.address, abi: claimEscrowAbi, functionName: 'statusOf', args: [id] }))
-  }
+export async function readAward(client: TempoClient, escrow: Hex, id: Hex): Promise<OnchainAward> {
+  const [a, s] = await Promise.all([
+    client.readContract({ address: escrow, abi: claimEscrowAbi, functionName: 'awardOf', args: [id] }) as Promise<{ token: Hex; amount: bigint; claimSigner: Hex; expiresAt: bigint; recipient: Hex }>,
+    client.readContract({ address: escrow, abi: claimEscrowAbi, functionName: 'statusOf', args: [id] }),
+  ])
+  return { token: a.token, amount: a.amount, claimSigner: a.claimSigner, expiresAt: Number(a.expiresAt), recipient: a.recipient, status: STATUS[Number(s)] }
+}
 
-  async events(): Promise<EscrowEvent[]> {
-    const logs = await this.client.getLogs({ address: this.address, fromBlock: this.fromBlock, toBlock: 'latest' })
-    const parsed = parseEventLogs({ abi: claimEscrowAbi, logs })
-    return parsed.map((l): EscrowEvent => {
-      const a = l.args as Record<string, unknown>
-      const base = { id: a.id as string, txHash: l.transactionHash as string }
-      switch (l.eventName) {
-        case 'Funded': return { kind: 'Funded', ...base, amount: a.amount as bigint, expiresAt: Number(a.expiresAt) }
-        case 'Cleared': return { kind: 'Cleared', ...base, paperworkHash: a.paperworkHash as string }
-        case 'Claimed': return { kind: 'Claimed', ...base, recipient: a.recipient as string }
-        default: return { kind: 'Reclaimed', ...base }
-      }
-    })
-  }
-  async chainTime(): Promise<number> {
-    return Number((await this.client.getBlock()).timestamp)
+function toEvent(l: { eventName: string; args: unknown; transactionHash: Hex | null }): EscrowEvent | undefined {
+  const a = l.args as Record<string, unknown>
+  const base = { id: a.id as string, txHash: (l.transactionHash ?? undefined) as string | undefined }
+  switch (l.eventName) {
+    case 'Funded': return { kind: 'Funded', ...base, amount: a.amount as bigint, expiresAt: Number(a.expiresAt) }
+    case 'Registered': return { kind: 'Registered', ...base, recipient: a.recipient as string }
+    case 'Cleared': return { kind: 'Cleared', ...base, paperworkHash: a.paperworkHash as string }
+    case 'Claimed': return { kind: 'Claimed', ...base, recipient: a.recipient as string }
+    case 'Revoked': return { kind: 'Revoked', ...base }
+    case 'Reclaimed': return { kind: 'Reclaimed', ...base }
+    default: return undefined // SignerRotated, Organizer* — not part of the award status
   }
 }
 
+/** Escrow events, optionally for one award only (filtered by the indexed id topic), scanned in bounded block ranges. */
+export async function escrowEvents(client: TempoClient, escrow: Hex, fromBlock: bigint, id?: Hex, step = 100_000n): Promise<EscrowEvent[]> {
+  const latest = await client.getBlockNumber()
+  const out: EscrowEvent[] = []
+  for (let from = fromBlock; from <= latest; from += step) {
+    const to = from + step - 1n > latest ? latest : from + step - 1n
+    const logs = await client.request({
+      method: 'eth_getLogs',
+      params: [{ address: escrow, fromBlock: `0x${from.toString(16)}`, toBlock: `0x${to.toString(16)}`, topics: id ? [null, id] : [] }],
+    } as never) as never[]
+    for (const l of parseEventLogs({ abi: claimEscrowAbi, logs })) {
+      const e = toEvent(l as never)
+      if (e) out.push(e)
+    }
+  }
+  return out
+}
+
+/** Organizer's view of its escrow (the organizer key signs fund/clear/revoke/reclaim). */
+export class TempoEscrow implements EscrowGateway {
+  constructor(private client: TempoClient, readonly address: Hex, private fromBlock: bigint) {}
+  get chainId() { return this.client.chain!.id }
+
+  private async send(calls: { to: Hex; data: Hex }[]): Promise<TxRef> {
+    const hash = await this.client.sendTransaction({ calls, account: this.client.account!, chain: this.client.chain } as never)
+    return txRef(this.client, (await this.client.waitForTransactionReceipt({ hash })) as never)
+  }
+  private call(functionName: 'clear' | 'revoke' | 'reclaim', args: readonly unknown[]) {
+    return { to: this.address, data: encodeFunctionData({ abi: claimEscrowAbi, functionName, args: args as never }) }
+  }
+
+  /** approve(total) + fund(award) × N in one Tempo transaction (batched calls — all or nothing). */
+  fundMany(token: Hex, awards: NewAward[]) {
+    const total = awards.reduce((n, a) => n + a.amount, 0n)
+    return this.send([
+      { to: token, data: encodeFunctionData({ abi: tip20Abi, functionName: 'approve', args: [this.address, total] }) },
+      ...awards.map((a) => ({ to: this.address, data: encodeFunctionData({ abi: claimEscrowAbi, functionName: 'fund', args: [a.id, a.token, a.amount, BigInt(a.expiresAt), a.claimSigner] }) })),
+    ])
+  }
+  clear(id: Hex, paperworkHash: Hex) { return this.send([this.call('clear', [id, paperworkHash])]) }
+  revoke(id: Hex) { return this.send([this.call('revoke', [id])]) }
+  reclaim(id: Hex) { return this.send([this.call('reclaim', [id])]) }
+  events(id?: Hex) { return escrowEvents(this.client, this.address, this.fromBlock, id) }
+  async chainTime() { return Number((await this.client.getBlock()).timestamp) }
+}
+
 /** Claim keys are plain secp256k1 keys; the escrow checks the signature with ecrecover. */
+export function claimDigestInner(purpose: 'claim' | 'register', escrow: Hex, chainId: number, id: Hex, recipient: Hex): Hex {
+  return keccak256(encodeAbiParameters(
+    [{ type: 'bytes32' }, { type: 'address' }, { type: 'uint256' }, { type: 'bytes32' }, { type: 'address' }],
+    [keccak256(toBytes(`claimdesk.${purpose}`)), escrow, BigInt(chainId), id, recipient],
+  ))
+}
+
 export const viemClaimKeys: ClaimKeys = {
   create() {
     const privateKey = generatePrivateKey()
     return { privateKey, address: privateKeyToAccount(privateKey).address }
   },
-  async signClaim({ claimKey, escrow, chainId, id, recipient }) {
-    const inner = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }, { type: 'bytes32' }, { type: 'address' }], [escrow, BigInt(chainId), id, recipient]))
-    return privateKeyToAccount(claimKey).signMessage({ message: { raw: inner } })
+  async sign({ purpose, claimKey, escrow, chainId, id, recipient }) {
+    return privateKeyToAccount(claimKey).signMessage({ message: { raw: claimDigestInner(purpose, escrow, chainId, id, recipient) } })
   },
 }
 
 /**
- * The winner's account sends claim(); the organizer's fee payer pays the fee (Tempo native fee sponsorship).
- * `sender` is the winner (no balance needed), `feePayer` is the organizer's sponsor key.
+ * The winner side: `client.account` sends register()/claim() (it needs no balance);
+ * `feePayer` is a local sponsor account, or `true` when the client's transport relays to a sponsoring service.
  */
-export class SponsoredClaimSubmitter implements ClaimSubmitter {
-  /** `feePayer`: a local sponsor account, or `true` when the client's transport relays to a sponsoring server. */
-  constructor(private senderClient: Client, private feePayer: Account | true) {}
-  async submit({ escrow, id, recipient, signature }: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }): Promise<TxRef> {
-    const receipt = await this.senderClient.writeContractSync({
-      address: escrow, abi: claimEscrowAbi, functionName: 'claim', args: [id, recipient, signature],
-      account: this.senderClient.account!, chain: this.senderClient.chain, feePayer: this.feePayer,
+export class TempoWinner implements WinnerGateway {
+  constructor(private client: TempoClient, private feePayer: Account | true) {}
+  private async send(functionName: 'register' | 'claim', a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }): Promise<TxRef> {
+    const hash = await this.client.writeContract({
+      address: a.escrow, abi: claimEscrowAbi, functionName, args: [a.id, a.recipient, a.signature],
+      account: this.client.account!, chain: this.client.chain, feePayer: this.feePayer,
     } as never)
-    return txRef(this.senderClient, receipt as never)
+    return txRef(this.client, (await this.client.waitForTransactionReceipt({ hash })) as never)
   }
+  register(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('register', a) }
+  claim(a: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }) { return this.send('claim', a) }
 }
 
 export { claimEscrowAbi }
