@@ -34,8 +34,9 @@ contract ClaimEscrowTest is Test {
     }
 
     function _clear() internal {
+        address registered = escrow.awardOf(ID).recipient;
         vm.prank(organizer);
-        escrow.clear(ID, keccak256("w8ben+kyc"));
+        escrow.clear(ID, keccak256("w8ben+kyc"), registered, 0, address(0));
     }
 
     function _sig(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
@@ -104,13 +105,75 @@ contract ClaimEscrowTest is Test {
         escrow.register(ID, winner, claimSig);
     }
 
-    function test_register_canBeChangedUntilCleared() public {
+    // ---- the forwarded-link attack (R2 finding): the link cannot move a registration
+    function test_register_isWriteOnce_forwardedLinkCannotRedirect() public {
         _fund(1 days);
-        escrow.register(ID, address(0x1111), _registerSig(address(0x1111)));
         escrow.register(ID, winner, _registerSig(winner));
+        address forwardee = address(0xF0F0);
+        bytes memory sig = _registerSig(forwardee);
+        vm.expectRevert(ClaimEscrow.AlreadyRegistered.selector);
+        escrow.register(ID, forwardee, sig);
         _clear();
         assertEq(token.balanceOf(winner), AMOUNT);
-        assertEq(token.balanceOf(address(0x1111)), 0);
+        assertEq(token.balanceOf(forwardee), 0);
+    }
+
+    function test_clear_withMismatchedRecipient_reverts() public {
+        _fund(1 days);
+        escrow.register(ID, address(0xF0F0), _registerSig(address(0xF0F0))); // someone with the link got there first
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
+        escrow.clear(ID, keccak256("kyc for winner"), winner, 0, address(0)); // paperwork was checked for `winner`
+    }
+
+    function test_resetRecipient_rotatesKey_oldSignaturesDead() public {
+        _fund(1 days);
+        bytes memory attackerSig = _registerSig(address(0xF0F0));
+        escrow.register(ID, address(0xF0F0), attackerSig);
+        uint256 newPk = 0xBEEF;
+        vm.prank(organizer);
+        escrow.resetRecipient(ID, vm.addr(newPk));
+        vm.expectRevert(ClaimEscrow.BadClaimSignature.selector);
+        escrow.register(ID, address(0xF0F0), attackerSig); // replay of the old signature
+        escrow.register(ID, winner, _sig(newPk, escrow.registerDigest(ID, winner)));
+        vm.prank(organizer);
+        escrow.clear(ID, keccak256("kyc"), winner, 0, address(0));
+        assertEq(token.balanceOf(winner), AMOUNT);
+    }
+
+    function test_changeRecipient_onlyByTheRegisteredAccount() public {
+        _fund(1 days);
+        escrow.register(ID, winner, _registerSig(winner));
+        vm.expectRevert(ClaimEscrow.NotRecipient.selector);
+        escrow.changeRecipient(ID, address(0xF0F0));
+        address cold = address(0xC01D);
+        vm.prank(winner);
+        escrow.changeRecipient(ID, cold);
+        vm.prank(organizer);
+        escrow.clear(ID, keccak256("kyc"), cold, 0, address(0));
+        assertEq(token.balanceOf(cold), AMOUNT);
+    }
+
+    function test_clear_withWithholding_splitsWithMemo() public {
+        _fund(1 days);
+        escrow.register(ID, winner, _registerSig(winner));
+        address irs = address(0x1E5);
+        uint96 tax = 3_000e6; // 30% at source
+        vm.prank(organizer);
+        escrow.clear(ID, keccak256("w8ben: no treaty"), winner, tax, irs);
+        assertEq(token.balanceOf(irs), tax);
+        assertEq(token.balanceOf(winner), AMOUNT - tax);
+        assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_clear_invalidWithholding_reverts() public {
+        _fund(1 days);
+        vm.startPrank(organizer);
+        vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
+        escrow.clear(ID, bytes32(0), address(0), 1, address(0));
+        vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
+        escrow.clear(ID, bytes32(0), address(0), AMOUNT, address(0x1E5));
+        vm.stopPrank();
     }
 
     // ---- path B: no registration → clearance opens a bearer claim (AC-3..AC-6)
@@ -265,7 +328,7 @@ contract ClaimEscrowTest is Test {
         escrow.fund(ID, address(token), AMOUNT, uint64(block.timestamp + 1 days), claimSigner);
         _fund(1 days);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
-        escrow.clear(ID, bytes32(0));
+        escrow.clear(ID, bytes32(0), address(0), 0, address(0));
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
         escrow.revoke(ID);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
@@ -295,7 +358,7 @@ contract ClaimEscrowTest is Test {
         vm.warp(block.timestamp + 2 hours);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.Expired.selector);
-        escrow.clear(ID, bytes32(0));
+        escrow.clear(ID, bytes32(0), address(0), 0, address(0));
     }
 
     // ---- accounting invariant (fuzz): every funded dollar ends in exactly one place

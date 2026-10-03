@@ -34,7 +34,9 @@ contract ClaimEscrow {
 
     event Funded(bytes32 indexed id, address indexed token, uint256 amount, uint64 expiresAt, address claimSigner);
     event Registered(bytes32 indexed id, address indexed recipient);
-    event Cleared(bytes32 indexed id, bytes32 paperworkHash, address recipient);
+    event Cleared(bytes32 indexed id, bytes32 paperworkHash, address recipient, uint256 withheld, address taxAccount);
+    event RecipientChanged(bytes32 indexed id, address indexed previous, address indexed next);
+    event RecipientReset(bytes32 indexed id);
     event Claimed(bytes32 indexed id, address indexed recipient, uint256 amount, bytes32 memo);
     event Revoked(bytes32 indexed id, uint256 amount);
     event Reclaimed(bytes32 indexed id, uint256 amount, bytes32 memo);
@@ -53,6 +55,10 @@ contract ClaimEscrow {
     error BadClaimSignature();
     error InvalidAward();
     error TransferFailed();
+    error AlreadyRegistered();
+    error RecipientMismatch();
+    error NotRecipient();
+    error InvalidWithholding();
 
     modifier onlyOrganizer() {
         if (msg.sender != organizer) revert NotOrganizer();
@@ -79,17 +85,37 @@ contract ClaimEscrow {
     }
 
     /// @notice The organizer states this award's paperwork (tax form, identity check, acceptance) is complete.
-    ///         If the winner registered an account, that account is paid now; otherwise a bearer claim opens.
-    /// @param paperworkHash hash of the organizer's paperwork record — the record stays off-chain.
-    function clear(bytes32 id, bytes32 paperworkHash) external onlyOrganizer {
+    /// @param paperworkHash   hash of the organizer's paperwork record — the record stays off-chain.
+    /// @param expectedRecipient the account the paperwork was checked against. Must equal the registered account
+    ///                          (path A, paid now) or be zero when nobody registered (path B, opens a bearer claim).
+    /// @param withheld        tax withheld at source, sent to `taxAccount` now with the award memo (0 for none).
+    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld, address taxAccount) external onlyOrganizer {
         Award storage a = _live(id);
         if (a.status != Status.Funded) revert AlreadyCleared();
-        emit Cleared(id, paperworkHash, a.recipient);
+        if (expectedRecipient != a.recipient) revert RecipientMismatch();
+        if (withheld >= a.amount || (withheld > 0 && taxAccount == address(0))) revert InvalidWithholding();
+        emit Cleared(id, paperworkHash, a.recipient, withheld, taxAccount);
+        if (withheld > 0) {
+            a.amount -= withheld;
+            ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
+        }
         if (a.recipient != address(0)) {
             _pay(id, a, a.recipient);
         } else {
             a.status = Status.Cleared;
         }
+    }
+
+    /// @notice Undo a registration before clearance (e.g. a forwarded link registered first) and issue a new link key
+    ///         in the same call, so no old register signature can be replayed.
+    function resetRecipient(bytes32 id, address newSigner) external onlyOrganizer {
+        Award storage a = _live(id);
+        if (a.status != Status.Funded) revert AlreadyCleared();
+        if (newSigner == address(0) || newSigner == a.claimSigner) revert InvalidAward();
+        a.recipient = address(0);
+        a.claimSigner = newSigner;
+        emit RecipientReset(id);
+        emit SignerRotated(id, newSigner);
     }
 
     /// @notice Cancel an award before its paperwork is cleared (e.g. failed due diligence). Funds return now.
@@ -136,15 +162,27 @@ contract ClaimEscrow {
 
     // ------------------------------------------------------------------ winner (anyone may submit; the link's key decides)
 
-    /// @notice Path A: the link holder names the account to be paid when paperwork clears. Changeable until then.
+    /// @notice Path A: the link holder names the account to be paid when paperwork clears. Write-once:
+    ///         after this, only that account itself (changeRecipient) — never the link — can move it.
     function register(bytes32 id, address recipient, bytes calldata signature) external {
         Award storage a = _live(id);
         if (a.status != Status.Funded) revert AlreadyCleared();
+        if (a.recipient != address(0)) revert AlreadyRegistered();
         if (recipient == address(0) || _recover(registerDigest(id, recipient), signature) != a.claimSigner) {
             revert BadClaimSignature();
         }
         a.recipient = recipient;
         emit Registered(id, recipient);
+    }
+
+    /// @notice The registered account moves the payout to another account it controls (before clearance).
+    function changeRecipient(bytes32 id, address next) external {
+        Award storage a = _live(id);
+        if (a.status != Status.Funded) revert AlreadyCleared();
+        if (msg.sender != a.recipient || a.recipient == address(0)) revert NotRecipient();
+        if (next == address(0)) revert InvalidAward();
+        emit RecipientChanged(id, a.recipient, next);
+        a.recipient = next;
     }
 
     /// @notice Path B: pay a cleared award that had no registered account to the recipient the link's key signed for.
