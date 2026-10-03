@@ -91,7 +91,8 @@ export const viemClaimKeys: ClaimKeys = {
  * `sender` is the winner (no balance needed), `feePayer` is the organizer's sponsor key.
  */
 export class SponsoredClaimSubmitter implements ClaimSubmitter {
-  constructor(private senderClient: Client, private feePayer: Account) {}
+  /** `feePayer`: a local sponsor account, or `true` when the client's transport relays to a sponsoring server. */
+  constructor(private senderClient: Client, private feePayer: Account | true) {}
   async submit({ escrow, id, recipient, signature }: { escrow: Hex; id: Hex; recipient: Hex; signature: Hex }): Promise<TxRef> {
     const receipt = await this.senderClient.writeContractSync({
       address: escrow, abi: claimEscrowAbi, functionName: 'claim', args: [id, recipient, signature],
