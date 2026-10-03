@@ -1,0 +1,55 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Claimdesk — technical demo</title>
+<style>
+:root{--blue:#3182F6;--ink:#191F28;--sub:#4E5968;--mute:#8B95A1;--soft:#F2F4F6;--line:#E5E8EB}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#fff;color:var(--ink);font:24px/1.45 -apple-system,BlinkMacSystemFont,sans-serif}
+section{display:none;position:absolute;inset:0;padding:48px 72px 110px;flex-direction:column;justify-content:center}section.on{display:flex}
+.k{font-size:18px;font-weight:700;color:var(--blue);letter-spacing:.04em;text-transform:uppercase}h2{font-size:38px;margin:8px 0 14px}
+pre{background:#0F1720;color:#E6EDF3;border-radius:16px;padding:18px 22px;font:15.5px/1.5 ui-monospace,Menlo,monospace;overflow:hidden;margin:0;white-space:pre-wrap}
+table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mute);font-size:15px}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:16px;color:var(--sub)}
+.row{display:flex;gap:20px}.card{flex:1;background:var(--soft);border-radius:18px;padding:18px 20px;font-size:19px}.card b{display:block;font-size:22px;margin-bottom:6px}
+</style></head><body>
+<section id="d1"><div class="k">The attack, refused on-chain (Tempo Moderato)</div><h2>A forwarded link can’t take the money</h2><table><tr><th>Attempt</th><th>Custom error</th><th>Transaction</th><th>Status</th></tr><tr><td>Forwarded link registered first → clear for the real winner</td><td><b>RecipientMismatch</b></td><td class="mono">0xffd299df…f2d4c6</td><td>reverted</td></tr><tr><td>Old link after reissue</td><td><b>BadClaimSignature</b></td><td class="mono">0x865e3d5b…ce4f89</td><td>reverted</td></tr><tr><td>Same link registers again</td><td><b>WrongState</b></td><td class="mono">0xb8eee46d…bbf070</td><td>reverted</td></tr><tr><td>Claim before paperwork</td><td><b>WrongState</b></td><td class="mono">0xb39d0da9…8f4553</td><td>reverted</td></tr><tr><td>Copied signature, other address</td><td><b>BadClaimSignature</b></td><td class="mono">0xde04acbc…19235c</td><td>reverted</td></tr><tr><td>Claim after expiry</td><td><b>Expired</b></td><td class="mono">0x59149b22…cb8684</td><td>reverted</td></tr></table></section>
+<section id="d2"><div class="k">ClaimEscrow.sol — register is write-once</div><pre>    function register(bytes32 id, address recipient, bytes calldata signature) external {
+        Award storage a = _live(id);
+        if (a.status != Status.Funded) revert WrongState();
+        if (recipient == address(0) || _recover(registerDigest(id, recipient), signature) != a.party) revert BadClaimSignature();
+        a.party = recipient; // the link key is retired in the same slot
+        a.status = Status.Registered;
+        emit Registered(id, recipient);
+    }
+</pre></section>
+<section id="d3"><div class="k">ClaimEscrow.sol — clear names the account the paperwork was checked for</div><pre>    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld, address taxAccount) external onlyOrganizer {
+        Award storage a = _live(id);
+        bool registered = a.status == Status.Registered;
+        if (!registered &amp;&amp; a.status != Status.Funded) revert WrongState();
+        if (expectedRecipient != (registered ? a.party : address(0))) revert RecipientMismatch();
+        if (withheld &gt;= a.amount || (withheld &gt; 0 &amp;&amp; taxAccount == address(0))) revert InvalidWithholding();
+        emit Cleared(id, paperworkHash, expectedRecipient, withheld, taxAccount);
+        if (withheld &gt; 0) {
+            a.amount -= withheld;
+            ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
+        }
+        if (registered) _pay(id, a, a.party);
+        else a.status = Status.Cleared;
+    }
+</pre></section>
+<section id="d4"><div class="k">Tempo features used</div><div class="row"><div class="card"><b>Batched calls</b>approve + N × fund in one transaction (≈566k gas per award; 2 slots)</div><div class="card"><b>Fee payer</b>relay co-signs fees; winner holds no balance</div><div class="card"><b>WebAuthn accounts</b>passkey = account; Account.fromWebAuthnP256</div><div class="card"><b>TIP-20 memos + fee tokens</b>award ref on every transfer; account page pays fees in the stablecoin</div></div></section>
+<section id="d5"><div class="k">Relay policy — pure function, tested</div><pre>export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = []): boolean {
+  const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
+  if (calls.length !== 1) return false
+  const [c] = calls
+  if (!c.to || !escrows.some((e) =&gt; isAddressEqual(e, c.to as Hex))) return false
+  const data = (c.data ?? &#x27;&#x27;).toLowerCase()
+  if (!data.startsWith(CLAIM_SELECTOR) &amp;&amp; !data.startsWith(REGISTER_SELECTOR)) return false
+  if (tx.gas !== undefined &amp;&amp; BigInt(tx.gas) &gt; MAX_SPONSORED_GAS) return false
+  if (tx.maxFeePerGas !== undefined &amp;&amp; BigInt(tx.maxFeePerGas) &gt; MAX_FEE_PER_GAS) return false
+  if (tx.maxPriorityFeePerGas !== undefined &amp;&amp; BigInt(tx.maxPriorityFeePerGas) &gt; MAX_PRIORITY_FEE_PER_GAS) return false
+  if (tx.feeToken &amp;&amp; feeTokens.length &gt; 0 &amp;&amp; !feeTokens.some((t) =&gt; isAddressEqual(t as Hex, tx.feeToken as Hex))) return false
+  if (tx.keyAuthorization) return false
+  if (tx.aaAuthorizationList &amp;&amp; tx.aaAuthorizationList.length &gt; 0) return false
+  return true
+}
+</pre></section>
+<script>function show(){const id=(location.hash||'#d1').slice(1);document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===id))}addEventListener('hashchange',show);show()</script>
+</body></html>
