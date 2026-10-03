@@ -9,6 +9,8 @@ Crypto World's Fair Hackathon (Colosseum, Fall 2026) · **Tempo track** · solo 
 ## The problem, in the industry's own words
 > "The prize fulfillment process can take up to 60 days from receipt of paperwork." … "make sure that your PayPal/Payoneer/Wise account is fully set up, that it can receive international transfers … If your prize is undeliverable, you may incur fees … or be delaying or forfeiting receipt of the prize." — Devpost Help Center, *How to Claim Your Hackathon Cash Prize* (updated 2026-08-21)
 >
+> "A lead from Superteam will reach out to the winners with a payment form. Fill in that form and expect to receive the reward within 7 days of submitting the form. Note that the winner needs to complete KYC" — Superteam Earn FAQ (read 2026-10-04)
+>
 > "Each winning team may be required to set up a wallet address, as directed by Administrator." — this hackathon's Official Rules §15(b); §13 adds "Prize Acceptance Documents" and "due diligence".
 
 Every program that pays strangers runs the same loop by hand: collect a tax form and identity check, then collect a payout address (or a PayPal/Payoneer/Wise account that must already exist and accept USD), then pay, then reconcile. The payout address and the paperwork arrive through different emails, so nothing ties the person who was checked to the account that gets paid.

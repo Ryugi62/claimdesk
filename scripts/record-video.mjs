@@ -41,8 +41,9 @@ if (planned > MAX_SECONDS) throw new Error(`narration ${planned.toFixed(1)}s > l
 
 // 2) record
 const browser = await chromium.launch()
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, recordVideo: { dir: WORK, size: { width: 1280, height: 720 } } })
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, acceptDownloads: true, locale: 'ko-KR', recordVideo: { dir: WORK, size: { width: 1280, height: 720 } } })
 const page = await ctx.newPage()
+page.on('dialog', (d) => d.accept()) // organizer console prompts/confirms: accept the default text
 if (scenes.some((s) => s.passkey)) {
   const cdp = await ctx.newCDPSession(page)
   await cdp.send('WebAuthn.enable')
@@ -81,6 +82,8 @@ for (const s of scenes) {
     else if (kind === 'wait') await page.waitForTimeout(Number(arg))
     else if (kind === 'waitfor') await page.waitForSelector(arg, { timeout: 60000 })
     else if (kind === 'open') await page.locator(arg).first().evaluate((el) => { el.open = true })
+    else if (kind === 'fill') { const [sel, ...v] = arg.split('='); await page.locator(sel).first().fill(v.join('=')) }
+    else if (kind === 'goto') { await page.goto(abs(arg)); current = abs(arg) }
     await caption(s.en)
   }
   const elapsed = (Date.now() - t0) / 1000 - start
