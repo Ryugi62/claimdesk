@@ -9,7 +9,7 @@ table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:16px;color:var(--sub)}
 .row{display:flex;gap:20px}.card{flex:1;background:var(--soft);border-radius:18px;padding:18px 20px;font-size:19px}.card b{display:block;font-size:22px;margin-bottom:6px}
 </style></head><body>
-<section id="d1"><div class="k">The attack, refused on-chain (Tempo Moderato)</div><h2>A forwarded link can’t take the money</h2><table><tr><th>Attempt</th><th>Custom error</th><th>Transaction</th><th>Status</th></tr><tr><td>Forwarded link registered first → clear for the real winner</td><td><b>RecipientMismatch</b></td><td class="mono">0xffd299df…f2d4c6</td><td>reverted</td></tr><tr><td>Old link after reissue</td><td><b>BadClaimSignature</b></td><td class="mono">0x865e3d5b…ce4f89</td><td>reverted</td></tr><tr><td>Same link registers again</td><td><b>WrongState</b></td><td class="mono">0xb8eee46d…bbf070</td><td>reverted</td></tr><tr><td>Claim before paperwork</td><td><b>WrongState</b></td><td class="mono">0xb39d0da9…8f4553</td><td>reverted</td></tr><tr><td>Copied signature, other address</td><td><b>BadClaimSignature</b></td><td class="mono">0xde04acbc…19235c</td><td>reverted</td></tr><tr><td>Claim after expiry</td><td><b>Expired</b></td><td class="mono">0x59149b22…cb8684</td><td>reverted</td></tr></table></section>
+<section id="d1"><div class="k">The attack, refused on-chain (Tempo Moderato · moderato-2026-10-03T23-16-33-741Z.json)</div><h2>A forwarded link can’t take the money</h2><table><tr><th>Attempt</th><th>Custom error</th><th>Transaction</th><th>Status</th></tr><tr><td>Forwarded link registered first → clear for the real winner</td><td><b>RecipientMismatch</b></td><td class="mono">0x4051c6a1…70484f</td><td>reverted</td></tr><tr><td>Old link after a new one is issued</td><td><b>BadClaimSignature</b></td><td class="mono">0xb0f5eba8…602ee7</td><td>reverted</td></tr><tr><td>Same link registers again</td><td><b>WrongState</b></td><td class="mono">0xdef52c86…91b073</td><td>reverted</td></tr><tr><td>Withholding above the fixed cap</td><td><b>InvalidWithholding</b></td><td class="mono">0xc19b2439…b6c791</td><td>reverted</td></tr><tr><td>Claim before paperwork</td><td><b>WrongState</b></td><td class="mono">0x55c81f42…37b836</td><td>reverted</td></tr><tr><td>Copied signature, other address</td><td><b>BadClaimSignature</b></td><td class="mono">0x1a5779ec…6865c8</td><td>reverted</td></tr><tr><td>Claim after expiry</td><td><b>Expired</b></td><td class="mono">0x16d9b521…5575cd</td><td>reverted</td></tr></table></section>
 <section id="d2"><div class="k">ClaimEscrow.sol — register is write-once</div><pre>    function register(bytes32 id, address recipient, bytes calldata signature) external {
         Award storage a = _live(id);
         if (a.status != Status.Funded) revert WrongState();
@@ -19,12 +19,12 @@ table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px
         emit Registered(id, recipient);
     }
 </pre></section>
-<section id="d3"><div class="k">ClaimEscrow.sol — clear names the account the paperwork was checked for</div><pre>    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld, address taxAccount) external onlyOrganizer {
+<section id="d3"><div class="k">ClaimEscrow.sol — clear names the account the paperwork names; withholding capped, to a fixed account</div><pre>    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld) external onlyOrganizer {
         Award storage a = _live(id);
         bool registered = a.status == Status.Registered;
         if (!registered &amp;&amp; a.status != Status.Funded) revert WrongState();
         if (expectedRecipient != (registered ? a.party : address(0))) revert RecipientMismatch();
-        if (withheld &gt;= a.amount || (withheld &gt; 0 &amp;&amp; taxAccount == address(0))) revert InvalidWithholding();
+        if (uint256(withheld) * 10_000 &gt; uint256(a.amount) * maxWithholdingBps) revert InvalidWithholding();
         emit Cleared(id, paperworkHash, expectedRecipient, withheld, taxAccount);
         if (withheld &gt; 0) {
             a.amount -= withheld;
@@ -38,9 +38,10 @@ table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px
 <section id="d5"><div class="k">Relay policy — pure function, tested</div><pre>export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = []): boolean {
   const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
   if (calls.length !== 1) return false
+  if (tx.gas === undefined) return false // caps are mandatory, not optional
   const [c] = calls
   if (!c.to || !escrows.some((e) =&gt; isAddressEqual(e, c.to as Hex))) return false
-  const data = (c.data ?? &#x27;&#x27;).toLowerCase()
+  const data = (c.data ?? '').toLowerCase()
   if (!data.startsWith(CLAIM_SELECTOR) &amp;&amp; !data.startsWith(REGISTER_SELECTOR)) return false
   if (tx.gas !== undefined &amp;&amp; BigInt(tx.gas) &gt; MAX_SPONSORED_GAS) return false
   if (tx.maxFeePerGas !== undefined &amp;&amp; BigInt(tx.maxFeePerGas) &gt; MAX_FEE_PER_GAS) return false
