@@ -3,25 +3,25 @@
 This is the attack Claimdesk is built around. A forwarded claim link registers its own account before the real winner. The organizer clears for the address the paperwork names, and the escrow refuses with RecipientMismatch, mined on Tempo testnet. A new link kills the old one, and the real winner is paid. The forwardee gets nothing.
 
 2
-00:00:22,694 --> 00:00:42,314
+00:00:22,693 --> 00:00:42,313
 Registration is write-once. The link key signs a domain-tagged digest over the escrow, the chain, the award and the recipient, and the recipient then replaces the link key in the same storage slot. Two slots per award, which matters on Tempo, where every new slot costs two hundred fifty thousand gas.
 
 3
-00:00:42,917 --> 00:00:57,877
+00:00:42,915 --> 00:00:57,875
 Clearing must name the account the paperwork names, and pays it in the same call. Withholding can only go to the tax account fixed at deploy, up to a fixed cap, so it cannot become a redirect. Both transfers carry the award reference as their memo.
 
 4
-00:00:58,480 --> 00:01:13,310
+00:00:58,478 --> 00:01:13,308
 On the Tempo side: one transaction with batched calls funds every award. The winner's passkey is the account. Our relay co-signs as fee payer, and the account page pays its own fees in the stablecoin, because Tempo has no gas token.
 
 5
-00:01:13,914 --> 00:01:32,134
+00:01:13,910 --> 00:01:32,130
 The relay answers only the methods a sponsored send needs, and sponsors a single register or claim call into our escrow with mandatory gas and fee caps. It simulates the exact call first, so junk never counts against a winner's quota. It runs in its own process with only a small fee-payer key.
 
 6
-00:01:32,736 --> 00:01:50,176
+00:01:32,733 --> 00:01:50,173
 The organizer console is local only, behind a loopback check, a host allow-list and a session token. The expected address comes from the winner's paperwork, never from the chain; a mismatch blocks clearing. The paperwork note stays local, and only its salted hash goes on-chain.
 
 7
-00:01:50,778 --> 00:02:00,128
+00:01:50,775 --> 00:02:00,125
 And the winner's side, at phone width: the receipt in their own currency, with a PDF, and the account page that sends on to an exchange deposit address with a tag.
