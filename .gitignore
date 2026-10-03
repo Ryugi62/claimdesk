@@ -13,3 +13,4 @@ docs/video/demo.json
 docs/video/work-*/
 docs/video/pitch.template.json
 paperwork/
+docs/video/*.mp4

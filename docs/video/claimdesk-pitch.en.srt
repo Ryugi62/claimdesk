@@ -1,43 +1,39 @@
 1
-00:00:00,000 --> 00:00:12,110
-A hackathon winner opens one link, touches their fingerprint, and when the organizer approves their paperwork, fifteen thousand dollars lands in that exact account. In the same transaction. That's Claimdesk.
+00:00:00,000 --> 00:00:11,250
+A hackathon winner opens one link and touches their fingerprint. When the organizer approves their paperwork, the money lands in that exact account, in the same transaction. This is Claimdesk.
 
 2
-00:00:16,566 --> 00:00:30,856
-Today the biggest hackathon platform tells winners prize fulfillment can take up to sixty days. Bounty boards send a payment form and a KYC check. This hackathon's own rules say winners may be required to set up a wallet address.
+00:00:17,857 --> 00:00:32,197
+Today, the biggest hackathon platform says prize payouts can take up to sixty days after paperwork. Bounty boards send a payment form and a KYC check. This hackathon's rules ask winners to set up a wallet address.
 
 3
-00:00:31,455 --> 00:00:39,765
-Every program that pays strangers runs this loop by hand, and the person whose paperwork was checked is never tied to the address that gets paid.
+00:00:32,800 --> 00:00:46,620
+I'm on the receiving side: a solo builder and engineering student in South Korea. I've entered a dozen global hackathons since August, each with its own payout rules, and my own route home has a hundred-dollar minimum and no payout in won.
 
 4
-00:00:40,366 --> 00:00:55,936
-I'm on the receiving side: a solo builder and engineering student in South Korea who sells software abroad. I've entered about a dozen global hackathons since August, each with different payout rules, and my own route home has a hundred-dollar minimum and no payout in won.
+00:00:47,221 --> 00:00:58,181
+The organizer locks every award on Tempo in one transaction. The winner's passkey becomes their account, registering is free, and the paperwork is filled in for that account.
 
 5
-00:00:56,538 --> 00:01:08,518
-The organizer locks every award on Tempo in one transaction. The winner opens their link once; the passkey becomes their account, and registering it is free — the organizer pays the fee.
+00:00:58,783 --> 00:01:12,363
+The organizer clears with the address the paperwork names, never one read from the chain. If a forwarded link registered first, the console flags it, the escrow would refuse, and a new link goes to the real winner.
 
 6
-00:01:09,120 --> 00:01:24,120
-The organizer checks the paperwork for that address, and clearing must name it. If a forwarded link registered first, the clearance is refused on-chain, and the organizer reissues the link. Tax withheld at source goes out in the same transaction.
+00:01:12,965 --> 00:01:19,125
+The winner gets a receipt in their own currency, and can move the money to a wallet or an exchange that takes Tempo deposits.
 
 7
-00:01:24,722 --> 00:01:33,502
-The winner gets a receipt in their own currency, and can move the money to a wallet or an exchange that accepts Tempo deposits, paying the tiny fee in the same dollars.
+00:01:20,261 --> 00:01:33,201
+Every rule is enforced by the contract, and every refusal you saw is a real transaction on Tempo testnet. Memos, fee sponsorship, passkey accounts and batched calls are all Tempo protocol features.
 
 8
-00:01:34,102 --> 00:01:46,642
-Every piece is a Tempo protocol feature: transfer memos, native fee sponsorship, passkey accounts and batched calls. Every refusal in the demo is a real transaction on Tempo testnet.
+00:01:33,803 --> 00:01:46,573
+Claim links are instant but ungated. Payout platforms are gated but make winners onboard. Claimdesk pays a stranger with no wallet, only after paperwork, and only to the account that paperwork names.
 
 9
-00:01:47,245 --> 00:01:59,345
-Claim links are instant but ungated. Payout platforms are gated but make the winner onboard. Claimdesk pays a stranger with no wallet, only after paperwork, to the account the paperwork was checked for.
+00:01:47,172 --> 00:02:02,042
+Organizers would pay a quarter percent plus a dollar per payout; winners pay nothing. I start with hackathons and bounties that already pay in stablecoins, then ecosystem grants. My edge is the operator workflow, not the contract.
 
 10
-00:01:59,947 --> 00:02:19,697
-We start where stablecoin programs already pay strangers: hackathons, bounties and ecosystem grants. One grant program the size of the Ethereum Foundation's paid out thirty-two point six million dollars in a single quarter. At a quarter percent plus a dollar per payout, three programs like that is a million a year.
-
-11
-00:02:20,297 --> 00:02:36,907
-No users yet. In the next thirty days: one real program as a pilot, a KYC and tax-form provider wired to the clear button, and mainnet. If you run a prize, bounty or grant program, we'd like to pay your next winners. Claimdesk: pay every winner by link.
+00:02:02,643 --> 00:02:14,893
+No users yet. Next: one real program as a pilot, a KYC provider wired to the clear button, and mainnet. If you run a prize, bounty or grant program, let me pay your next winners.
