@@ -29,21 +29,22 @@ export interface SponsorRequest {
 export const awardIdOf = (data: string) => ('0x' + data.replace(/^0x/, '').slice(8, 72)).toLowerCase()
 
 /**
- * Sponsorship policy (pure): the organizer pays fees only for ONE register() or claim() call into its own escrows,
- * with bounded gas and no account-key side effects.
+ * Sponsorship policy (pure): the organizer pays fees only for ONE register() / claim() / changeRecipient() call into
+ * its own escrows, with gas, fee caps and a short validity window all present and bounded, and no account-key side effects.
  */
 export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = [], nowSec = Math.floor(Date.now() / 1000)): boolean {
   const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
   if (calls.length !== 1) return false
-  if (tx.gas === undefined) return false // caps are mandatory, not optional
-  if (tx.validBefore !== undefined && Number(tx.validBefore) > nowSec + MAX_VALID_FOR_SECONDS) return false
+  // caps are mandatory, not optional: a missing field is a refusal
+  if (tx.gas === undefined || tx.maxFeePerGas === undefined || tx.maxPriorityFeePerGas === undefined || tx.validBefore === undefined) return false
+  if (Number(tx.validBefore) > nowSec + MAX_VALID_FOR_SECONDS) return false
   const [c] = calls
   if (!c.to || !escrows.some((e) => isAddressEqual(e, c.to as Hex))) return false
   const data = (c.data ?? '').toLowerCase()
   if (![CLAIM_SELECTOR, REGISTER_SELECTOR, CHANGE_RECIPIENT_SELECTOR].some((sel) => data.startsWith(sel))) return false
   if (tx.gas !== undefined && BigInt(tx.gas) > MAX_SPONSORED_GAS) return false
-  if (tx.maxFeePerGas !== undefined && BigInt(tx.maxFeePerGas) > MAX_FEE_PER_GAS) return false
-  if (tx.maxPriorityFeePerGas !== undefined && BigInt(tx.maxPriorityFeePerGas) > MAX_PRIORITY_FEE_PER_GAS) return false
+  if (BigInt(tx.maxFeePerGas) > MAX_FEE_PER_GAS) return false
+  if (BigInt(tx.maxPriorityFeePerGas) > MAX_PRIORITY_FEE_PER_GAS) return false
   if (tx.feeToken && feeTokens.length > 0 && !feeTokens.some((t) => isAddressEqual(t as Hex, tx.feeToken as Hex))) return false
   if (tx.keyAuthorization) return false
   if (tx.aaAuthorizationList && tx.aaAuthorizationList.length > 0) return false

@@ -11,7 +11,8 @@ main{max-width:960px}
 .row .ref{white-space:nowrap}
 .row .ref{font-weight:700}
 .row .amt{text-align:right;font-variant-numeric:tabular-nums}
-.row .acct{font:13px/1.4 ui-monospace,Menlo,monospace;color:var(--sub);word-break:break-all}
+.row .acct{font-size:13px;line-height:1.45;color:var(--sub);overflow-wrap:anywhere}
+.chip.conflict{background:var(--no-bg);color:var(--no)}
 .row .chip{margin:0}
 .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .actions button,.bar button{height:38px;border:0;border-radius:10px;padding:0 12px;font-weight:600;cursor:pointer;background:var(--blue);color:#fff;font-size:13px}
@@ -72,12 +73,16 @@ async function load() {
     const short = (a) => a.slice(0, 8) + '…' + a.slice(-6)
     const acct = x.recipient ? `paid → <a href="${explorer}/tx/${x.txs.Claimed}" target="_blank" rel="noopener">${esc(short(x.recipient))}</a>` : x.registered ? `registered ${esc(short(x.registered))}` : 'no account yet'
     const pw = x.status === 'Claimed' || x.status === 'Revoked' || x.status === 'Reclaimed' ? '' : (x.paperwork ? `<div class="pw">signed paperwork: ${esc(x.paperwork.legalName)} (${esc(x.paperwork.taxCountry)}) for ${esc(short(x.paperwork.address))} — <b>${x.binding === 'match' ? 'matches the registered account' : x.binding === 'mismatch' ? 'DOES NOT match the registered account — issue a new link' : 'no account registered yet'}</b>${x.conflicts ? ` · ${x.conflicts} other submission(s) for other accounts — check identities` : ''}</div>` : '<div class="pw">paperwork: not received</div>') + (x.reissueAt ? `<div class="pw">new link scheduled — can be issued after ${esc(new Date(x.reissueAt * 1000).toLocaleString())}</div>` : '')
-    const canClear = x.status === 'Registered'
+    const canClear = x.status === 'Registered' && x.binding === 'match'
+    const conflict = x.status === 'Registered' && x.binding === 'mismatch'
     const sel = x.status === 'Registered' && x.binding === 'match' ? `<input type="checkbox" data-sel="${esc(x.ref)}" aria-label="select ${esc(x.ref)}" style="width:auto;height:auto;display:inline;margin:0 6px 0 0">` : ''
     const act = canClear ? `<button data-clear="${esc(x.ref)}">Clear &amp; pay</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
+      : conflict ? `<button data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-clear="${esc(x.ref)}">Review</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
+      : x.status === 'Registered' ? `<button class="ghost" data-clear="${esc(x.ref)}">Clear (paste paperwork address)</button><button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button>`
       : x.status === 'Funded' ? `<button class="ghost" data-reissue="${esc(x.ref)}">New link</button><button class="ghost" data-revoke="${esc(x.ref)}">Revoke</button><button class="ghost" data-bearer="${esc(x.ref)}" title="Pays whoever holds the link — only if you delivered it to a verified person">Advanced: open bearer claim</button>`
       : x.paperworkHash ? `<button class="ghost" data-verify="${esc(x.ref)}">Verify paperwork</button>` : ''
-    return `<div class="row"><div class="ref">${sel}${esc(x.ref)}</div><span class="chip ${x.tone}">${esc(x.says)}</span><div class="amt">$${fmt(x.amount ?? 0)}</div><div class="acct">${acct}${pw}</div><div class="actions">${act}</div></div>`
+    const pill = conflict ? '<span class="chip conflict">Conflict — paperwork names another account</span>' : `<span class="chip ${x.tone}">${esc(x.says)}</span>`
+    return `<div class="row"><div class="ref">${sel}${esc(x.ref)}</div>${pill}<div class="amt">$${fmt(x.amount ?? 0)}</div><div class="acct">${acct}${pw}</div><div class="actions">${act}</div></div>`
   }).join('')
   document.getElementById('clearSel').hidden = !rows.some((x) => x.status === 'Registered' && x.binding === 'match')
   document.getElementById('escrow').innerHTML = `Escrow <a href="${explorer}/address/${s.escrow}" target="_blank" rel="noopener">${esc(s.escrow)}</a> on chain ${s.chainId}.`

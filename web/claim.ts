@@ -57,7 +57,7 @@ async function render(cfg: Config, escrow: Hex, ref: string) {
   const mine = savedPasskey()
   const myAddress = mine ? accountOf(mine).address : undefined
   const isMine = (a?: string) => !!a && !!myAddress && a.toLowerCase() === myAddress.toLowerCase()
-  const head = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${money(award.amount, meta.decimals)}</div><div class="unit">${esc(meta.symbol)} · award ${esc(ref)}</div>`
+  const head = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${money(award.amount, meta.decimals)}</div><div class="unit">US dollars (stablecoin) · award ${esc(ref)}</div>`
   const d = describeStatus({ status: award.status })
   const chip = { Funded: 'Locked for you', Registered: 'Account ready', Cleared: 'Paperwork approved', Claimed: 'Paid', Expired: 'Expired', Reclaimed: 'Returned', Revoked: 'Cancelled' }[award.status as string] ?? 'Check with the organizer'
   const how = `<details><summary>How this works</summary><p>A passkey is the fingerprint or face unlock on this device. It becomes your account on the Tempo network — no app, no seed phrase. The organizer pays the network fee. The money is already locked for you, and it moves only after the organizer approves your paperwork.</p></details>`
@@ -168,7 +168,7 @@ async function showReceipt(cfg: Config, escrow: Hex, ref: string, txHash: Hex, r
   const receipt = await receiptFor({ ref, amount, decimals: meta.decimals, symbol: meta.symbol, tx: { hash: txHash, blockTime: new Date(Number(block.timestamp) * 1000) }, memo: awardMemo(ref), recipient, withheld }, new EcbRates(), localCurrency())
   const explorerUrl = `${cfg.explorer}/tx/${txHash}`
   const local = receipt.local ? `<div class="card"><div class="program">For your records</div><div class="local">≈ ${esc(receipt.local.amountText)} ${esc(receipt.local.currency)}</div><p>USD/${esc(receipt.local.currency)} cross rate from the ECB reference rates of ${esc(receipt.local.rateDate)} (1 USD = ${Number(receipt.local.rate).toLocaleString('en-US')} ${esc(receipt.local.currency)}). Your tax office may require its own official rate.</p></div>` : ''
-  app.innerHTML = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${esc(receipt.amountText)}</div><div class="unit">${esc(receipt.symbol)} received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
+  app.innerHTML = `<div class="program">${esc(cfg.program)}</div><div class="amount">$${esc(receipt.amountText)}</div><div class="unit">US dollars received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
   <span class="chip ok">Received</span>${receipt.withholding ? `<p>Award $${esc(receipt.withholding.grossText)} − $${esc(receipt.withholding.withheldText)} tax withheld at source by the organizer.</p>` : ''}${local}
   <p class="alt"><a href="account">Open my account</a> — move it to your own wallet or an exchange that accepts Tempo deposits.</p>
   <details><summary>Receipt details</summary><dl>
