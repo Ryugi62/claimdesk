@@ -1,12 +1,46 @@
-import { createClient, http, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
+import { createClient, custom, publicActions, walletActions, encodeAbiParameters, encodeFunctionData, keccak256, toBytes, parseEventLogs, type Account, type Chain, type Transport } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { tempoActions } from 'viem/tempo'
 import { claimEscrowAbi, claimEscrowBytecode } from './claimEscrowArtifact'
 import type { ClaimKeys, EscrowGateway, Hex, NewAward, TxRef, WinnerGateway } from '../application/ports'
 import type { EscrowEvent } from '../domain/status'
 
+/**
+ * JSON-RPC over HTTP that rides out public-RPC hiccups (HTTP 5xx, "no healthy upstreams" -32002, rate limits):
+ * retries up to 8 times with backoff. Re-sending a signed transaction is idempotent (same hash).
+ */
+export function resilientHttp(url?: string, tries = 8): Transport {
+  return (config) => {
+    const target = url ?? config.chain?.rpcUrls.default.http[0]
+    if (!target) throw new Error('no RPC url')
+    let id = 0
+    return custom({
+      async request({ method, params }) {
+        let last: unknown
+        for (let i = 0; i < tries; i++) {
+          try {
+            const res = await fetch(target, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) })
+            if (res.status >= 500 || res.status === 429) throw new Error(`HTTP ${res.status}`)
+            const body = (await res.json()) as { result?: unknown; error?: { code: number; message: string; data?: unknown } }
+            if (body.error) {
+              if ([-32002, -32005, -32603].includes(body.error.code) && !/revert/i.test(body.error.message)) throw new Error(body.error.message)
+              throw Object.assign(new Error(body.error.message), { code: body.error.code, data: body.error.data, final: true })
+            }
+            return body.result
+          } catch (e) {
+            if ((e as { final?: boolean }).final) throw e
+            last = e
+            await new Promise((r) => setTimeout(r, 600 * (i + 1)))
+          }
+        }
+        throw last
+      },
+    }, { retryCount: 0 })(config)
+  }
+}
+
 export function tempoClient(chain: Chain, account?: Account, transport?: Transport) {
-  return createClient({ chain, transport: transport ?? http(undefined, { retryCount: 6, retryDelay: 1200 }), account }).extend(publicActions).extend(walletActions).extend(tempoActions())
+  return createClient({ chain, transport: transport ?? resilientHttp(), account }).extend(publicActions).extend(walletActions).extend(tempoActions())
 }
 export type TempoClient = ReturnType<typeof tempoClient>
 

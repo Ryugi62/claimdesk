@@ -83,6 +83,7 @@ async function main() {
   const fundRcpt = await org.getTransactionReceipt({ hash: fundTx.hash })
   const shortTx = await fundBatch([P.D], escrow, PATH_USD, now + 75)
   record('fund-batch', { awards: long.length, tx: fundTx.hash, gasUsed: fundRcpt.gasUsed, gasPerAward: fundRcpt.gasUsed / BigInt(long.length), shortExpiryTx: shortTx.hash })
+  await escrow.clear(P.D.id, hashOf('D'), ZERO) // D is cleared at once so that only expiry stands between it and its holder
 
   const fresh = () => privateKeyToAccount(generatePrivateKey())
   const gw = (c: TempoClient) => new TempoWinner(c, feePayer)
@@ -138,7 +139,6 @@ async function main() {
   record('C-register-after-revoke-refused', await mustRevert(cB, feePayer, dep.address, call('register', [P.C.id, wB.address, await sign('register', P.C.ref, wB.address)])))
 
   // D — expiry
-  await escrow.clear(P.D.id, hashOf('D'), ZERO)
   while (Number((await org.getBlock()).timestamp) < now + 76) await new Promise((r) => setTimeout(r, 2000))
   record('D-claim-after-expiry-refused', await mustRevert(cB, feePayer, dep.address, call('claim', [P.D.id, wB.address, await sign('claim', P.D.ref, wB.address)])))
   record('D-reclaim', { tx: (await escrow.reclaim(P.D.id)).hash })

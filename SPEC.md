@@ -1,4 +1,4 @@
-# Claimdesk — SPEC (SDD, v0.2 2026-10-04)
+# Claimdesk — SPEC (SDD, v0.3 2026-10-04)
 
 ## 0. One line
 Pay every winner by link: an organizer locks each award on Tempo when it announces winners; each winner opens their link once and registers a passkey account; clearing that winner's paperwork pays exactly that account in the same transaction — no gas, no seed phrase, no "send us your wallet address" email.
@@ -35,8 +35,8 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 | Receipt | proof of receipt for the winner's own records | `Receipt` |
 
 ## 4. Domain model
-- `Award { token, amount, claimSigner, expiresAt, status, recipient }` — id = memo (32-byte reference); 2 storage slots (+1 when registered).
-- State machine: `Funded --register--> Funded(recipient)`; `Funded --clear--> Claimed` if a recipient is registered, else `Cleared --claim--> Claimed`; `Funded --revoke--> Revoked`; `Funded|Cleared --(now ≥ expiresAt)--> Expired --reclaim--> Reclaimed`. Claim on Funded → `NotCleared`; any action on a settled award → `AlreadySettled`; after expiry → `Expired`; revoke after clearance → `AlreadyCleared`.
+- `Award { token, amount, party, expiresAt, status }` — id = memo (32-byte reference); `party` is the link key until registration, then the registered account; 2 storage slots.
+- State machine: `Funded --register--> Registered --clear(expected = it)--> Claimed`; `Funded --clear(expected = 0)--> Cleared --claim--> Claimed`; `Funded|Registered --reissueLink--> Funded`; `Funded|Registered --revoke--> Revoked`; unsettled `--(now ≥ expiresAt)--> Expired --reclaim--> Reclaimed`. Wrong state → `WrongState`; after expiry → `Expired`.
 - `Receipt { award ref, amount, token symbol, txHash, blockTime, memo, local: { currency, rate, rateDate, source, amount } }`.
 
 ## 5. Use cases (application)
@@ -59,9 +59,11 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 - AC-8 Given a paid claim, when a receipt is built with an FX rate, then local amount = amount × rate rounded to 2 decimals, and the rate date ≤ block date.
 - AC-9 Given escrow events, when reconciled, then each award shows exactly one status consistent with the state machine.
 - AC-10 Given a winner with no funds, when they register or claim through the web page, then the fee is paid by the fee payer (winner balance before = 0, after = amount).
-- AC-11 Given a registered account, when the organizer clears, then that account is paid in the clearing transaction and a different recipient can never be paid.
+- AC-11 Given a registered account, when the organizer clears naming that account, then it is paid in the clearing transaction; naming any other account reverts `RecipientMismatch`; the link cannot register again (`WrongState`); only the registered account can move it (`changeRecipient`).
 - AC-12 Given a funded award, when revoked, then the organizer is repaid now and register/claim revert; revoke after clearance reverts `AlreadyCleared`.
-- AC-13 Given a leaked link, when the organizer rotates the signer, then the old key's signatures revert.
+- AC-13 Given a forwarded link that registered first, when the organizer reissues the link, then the registration is wiped, the old key's signatures revert, and the winner registers with the new link. After clearance the organizer can neither revoke nor reissue.
+- AC-16 Given a withholding at clearance, the tax account receives it and the winner receives the rest, both with the award memo; the receipt shows gross, withheld and net.
+- AC-17 The organizer console answers only loopback requests with an allowed Host, same origin and the session token; the winner relay process never holds the organizer key.
 - AC-14 Sponsorship policy: exactly one `register()`/`claim()` call into an own escrow, gas ≤ 1.2M, no key authorizations, simulation succeeds, ≤ 30 requests/min/IP.
 - AC-15 Given no reference rate for the winner's currency, the receipt is shown in USD only (never an error after the money moved).
 
@@ -88,5 +90,6 @@ Domain and application import nothing from adapters/infrastructure (checked by a
 `node scripts/web-claim.mjs`: Chromium with a virtual WebAuthn authenticator against `npm run serve`: register with a passkey → organizer clears via the console API → receipt + PDF → account page sends with a deposit tag → second winner bearer-claims; screenshots at 390/1280 with a horizontal-overflow check. Writes `docs/live/web-<ts>.json`.
 
 ## 11. Change log
-- v0.1 2026-10-04 — first spec (idea chosen by blind review: claim-link payouts for prize programs, Tempo track).
-- v0.2 2026-10-04 — after mock review round 1 (53/54/58): register-before-clear binds paperwork to the paid account; revoke, rotate, two-step organizer; batch funding; refusals mined on-chain; separate fee payer + simulated, rate-limited relay; account page (send, fee in stablecoin); PDF receipt; static build.
+- v0.1 2026-10-04 — first spec: claim-link payouts for prize programs on Tempo.
+- v0.2 2026-10-04 — register-before-clear; revoke; batch funding; refusals mined on-chain; separate fee payer; account page; PDF receipt; static build.
+- v0.3 2026-10-04 — registration is write-once (Registered state; the account replaces the link key in the same slot); clear() names the expected recipient; reissueLink only before clearance; organizer cannot touch a cleared award; minTtl floor; withholding at clearance; relay/console split; paperwork records with verify.
