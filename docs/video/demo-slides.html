@@ -9,7 +9,7 @@ table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:16px;color:var(--sub)}
 .row{display:flex;gap:20px}.card{flex:1;background:var(--soft);border-radius:18px;padding:18px 20px;font-size:19px}.card b{display:block;font-size:22px;margin-bottom:6px}
 </style></head><body>
-<section id="d1"><div class="k">The attack, refused on-chain (Tempo Moderato · moderato-2026-10-03T23-16-33-741Z.json)</div><h2>A forwarded link can’t take the money</h2><table><tr><th>Attempt</th><th>Custom error</th><th>Transaction</th><th>Status</th></tr><tr><td>Forwarded link registered first → clear for the real winner</td><td><b>RecipientMismatch</b></td><td class="mono">0x4051c6a1…70484f</td><td>reverted</td></tr><tr><td>Old link after a new one is issued</td><td><b>BadClaimSignature</b></td><td class="mono">0xb0f5eba8…602ee7</td><td>reverted</td></tr><tr><td>Same link registers again</td><td><b>WrongState</b></td><td class="mono">0xdef52c86…91b073</td><td>reverted</td></tr><tr><td>Withholding above the fixed cap</td><td><b>InvalidWithholding</b></td><td class="mono">0xc19b2439…b6c791</td><td>reverted</td></tr><tr><td>Claim before paperwork</td><td><b>WrongState</b></td><td class="mono">0x55c81f42…37b836</td><td>reverted</td></tr><tr><td>Copied signature, other address</td><td><b>BadClaimSignature</b></td><td class="mono">0x1a5779ec…6865c8</td><td>reverted</td></tr><tr><td>Claim after expiry</td><td><b>Expired</b></td><td class="mono">0x16d9b521…5575cd</td><td>reverted</td></tr></table></section>
+<section id="d1"><div class="k">The attack, refused on-chain (Tempo Moderato · moderato-2026-10-03T23-39-17-996Z.json)</div><h2>A forwarded link can’t take the money</h2><table><tr><th>Attempt</th><th>Custom error</th><th>Transaction</th><th>Status</th></tr><tr><td>Forwarded link registered first → clear for the real winner</td><td><b>RecipientMismatch</b></td><td class="mono">0xe0ab4a36…c6de1b</td><td>reverted</td></tr><tr><td>Old link after a new one is issued</td><td><b>BadClaimSignature</b></td><td class="mono">0x0bc222f6…021ec7</td><td>reverted</td></tr><tr><td>Same link registers again</td><td><b>WrongState</b></td><td class="mono">0x1df08145…96f525</td><td>reverted</td></tr><tr><td>Withholding above the fixed cap</td><td><b>InvalidWithholding</b></td><td class="mono">0x3e07109d…da11e5</td><td>reverted</td></tr><tr><td>Claim before paperwork</td><td><b>WrongState</b></td><td class="mono">0xbc598a6d…d0659d</td><td>reverted</td></tr><tr><td>Copied signature, other address</td><td><b>BadClaimSignature</b></td><td class="mono">0x0ac8daad…7b9356</td><td>reverted</td></tr><tr><td>Claim after expiry</td><td><b>Expired</b></td><td class="mono">0x61af3e45…ce9c55</td><td>reverted</td></tr></table></section>
 <section id="d2"><div class="k">ClaimEscrow.sol — register is write-once</div><pre>    function register(bytes32 id, address recipient, bytes calldata signature) external {
         Award storage a = _live(id);
         if (a.status != Status.Funded) revert WrongState();
@@ -30,19 +30,27 @@ table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px
             a.amount -= withheld;
             ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
         }
-        if (registered) _pay(id, a, a.party);
-        else a.status = Status.Cleared;
+        delete pendingReissue[id];
+        if (registered) {
+            _pay(id, a, a.party);
+        } else {
+            a.status = Status.Cleared;
+            // a bearer claim always gets a full window: clearing just before expiry and reclaiming is impossible
+            uint64 floor = uint64(block.timestamp) + minTtl;
+            if (a.expiresAt &lt; floor) a.expiresAt = floor;
+        }
     }
 </pre></section>
 <section id="d4"><div class="k">Tempo features used</div><div class="row"><div class="card"><b>Batched calls</b>approve + N × fund in one transaction (≈566k gas per award; 2 slots)</div><div class="card"><b>Fee payer</b>relay co-signs fees; winner holds no balance</div><div class="card"><b>WebAuthn accounts</b>passkey = account; Account.fromWebAuthnP256</div><div class="card"><b>TIP-20 memos + fee tokens</b>award ref on every transfer; account page pays fees in the stablecoin</div></div></section>
-<section id="d5"><div class="k">Relay policy — pure function, tested</div><pre>export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = []): boolean {
+<section id="d5"><div class="k">Relay policy — pure function, tested</div><pre>export function sponsorable(escrows: Hex[], tx: SponsorRequest, feeTokens: string[] = [], nowSec = Math.floor(Date.now() / 1000)): boolean {
   const calls = tx.calls ?? [{ to: tx.to, data: tx.data }]
   if (calls.length !== 1) return false
   if (tx.gas === undefined) return false // caps are mandatory, not optional
+  if (tx.validBefore !== undefined &amp;&amp; Number(tx.validBefore) &gt; nowSec + MAX_VALID_FOR_SECONDS) return false
   const [c] = calls
   if (!c.to || !escrows.some((e) =&gt; isAddressEqual(e, c.to as Hex))) return false
   const data = (c.data ?? '').toLowerCase()
-  if (!data.startsWith(CLAIM_SELECTOR) &amp;&amp; !data.startsWith(REGISTER_SELECTOR)) return false
+  if (![CLAIM_SELECTOR, REGISTER_SELECTOR, CHANGE_RECIPIENT_SELECTOR].some((sel) =&gt; data.startsWith(sel))) return false
   if (tx.gas !== undefined &amp;&amp; BigInt(tx.gas) &gt; MAX_SPONSORED_GAS) return false
   if (tx.maxFeePerGas !== undefined &amp;&amp; BigInt(tx.maxFeePerGas) &gt; MAX_FEE_PER_GAS) return false
   if (tx.maxPriorityFeePerGas !== undefined &amp;&amp; BigInt(tx.maxPriorityFeePerGas) &gt; MAX_PRIORITY_FEE_PER_GAS) return false

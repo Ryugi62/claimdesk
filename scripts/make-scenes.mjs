@@ -13,10 +13,12 @@ const form = (name, cc) => ['waitfor:#legalName', `fill:#legalName=${name}`, `fi
 const clearFromConsole = (ref) => [`goto:${consoleUrl}`, `waitfor:[data-clear="${ref}"]`, 'wait:400', `click:[data-clear="${ref}"]`, 'waitfor:.bind.match', 'fill:#dlgNote=identity document checked', 'wait:900', 'click:#dlgOk', 'wait:4500']
 
 const pitchScenes = [
-  { id: 'p01', url: A, passkey: true, en: pitch[0], actions: ['click:#cta', 'waitfor:#registered', 'click:#cta', ...form('Kenji Mori', 'JP'), ...clearFromConsole(prep.clip), `goto:${A}`, 'waitfor:.local'] },
+  // hidden: register + sign paperwork before the camera rolls (trimmed), so the video opens on "Account ready"
+  { id: 'p00', hidden: true, url: A, passkey: true, actions: ['waitfor:.chip', 'click:#cta', 'waitfor:#registered', 'click:#cta', ...form('Kenji Mori', 'JP'), `goto:${A}`, 'waitfor:#registered'] },
+  { id: 'p01', url: A, passkey: true, en: pitch[0], actions: ['waitfor:#registered', 'wait:1500', ...clearFromConsole(prep.clip), `goto:${A}`, 'waitfor:.local'] },
   { id: 'p02', url: S('q'), en: pitch[1] },
   { id: 'p03', url: S('s4'), en: pitch[2] },
-  { id: 'p04', url: B, en: pitch[3], actions: ['wait:400', 'click:#cta', 'waitfor:#registered', 'wait:700', 'click:#cta', ...form('Ana Souza', 'BR')] },
+  { id: 'p04', url: B, en: pitch[3], actions: ['waitfor:.chip', 'wait:400', 'click:#cta', 'waitfor:#registered', 'wait:700', 'click:#cta', ...form('Ana Souza', 'BR')] },
   { id: 'p05', url: consoleUrl, en: pitch[4], actions: [`waitfor:[data-clear="${prep.forwarded}"]`, 'wait:600', `click:[data-clear="${prep.forwarded}"]`, 'waitfor:.bind.mismatch', 'wait:3500', 'click:dialog .no', 'wait:400', `click:[data-reissue="${prep.forwarded}"]`, 'wait:2500'] },
   { id: 'p06', url: A, en: pitch[5], actions: ['waitfor:.local', 'wait:1500', 'click:#cta', 'wait:600', 'goto:http://localhost:5174/account', 'waitfor:#to', 'fill:#to=0x000000000000000000000000000000000000dEaD', 'fill:#amount=250', 'fill:#memo=DEPOSIT-TAG-77', 'click:#cta', 'waitfor:#sent'] },
   { id: 'p07', url: S('s7'), en: pitch[6] },

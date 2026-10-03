@@ -31,16 +31,18 @@ function durationOf(file) {
 
 // 1) narration per scene
 for (const s of scenes) {
+  if (s.hidden) continue
   const mp3 = join(WORK, `${s.id}.mp3`)
   execFileSync(TTS_PY, ['-m', 'edge_tts', ...VOICE, '--text', s.en, '--write-media', mp3], { stdio: ['ignore', 'ignore', 'inherit'] })
   execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-i', mp3, '-af', 'areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse', '-ar', '48000', '-ac', '2', join(WORK, `${s.id}.wav`)])
   s.seconds = durationOf(join(WORK, `${s.id}.wav`))
 }
-const planned = scenes.reduce((n, s) => n + s.seconds + 0.6, 0)
+const planned = scenes.filter((s) => !s.hidden).reduce((n, s) => n + s.seconds + 0.6, 0)
 if (planned > MAX_SECONDS) throw new Error(`narration ${planned.toFixed(1)}s > limit ${MAX_SECONDS}s — cut text before recording`)
 
 // 2) record
 const browser = await chromium.launch()
+const tCtx = Date.now()
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, acceptDownloads: true, locale: 'ko-KR', recordVideo: { dir: WORK, size: { width: 1280, height: 720 } } })
 const page = await ctx.newPage()
 page.on('dialog', (d) => d.accept()) // organizer console prompts/confirms: accept the default text
@@ -59,9 +61,27 @@ async function caption(text) {
     el.textContent = text
   }, { css: CAP, text })
 }
-const t0 = Date.now()
-const starts = []
 let current = ''
+async function act(s) {
+  for (const a of s.actions ?? []) {
+    const [kind, ...rest] = a.split(':')
+    const arg = rest.join(':')
+    if (kind === 'click') { const l = page.locator(arg).first(); await l.scrollIntoViewIfNeeded(); await l.click() }
+    else if (kind === 'wait') await page.waitForTimeout(Number(arg))
+    else if (kind === 'waitfor') await page.waitForSelector(arg, { timeout: 60000 })
+    else if (kind === 'fill') { const [sel, ...v] = arg.split('='); await page.locator(sel).first().fill(v.join('=')) }
+    else if (kind === 'goto') { await page.goto(abs(arg)); current = abs(arg) }
+  }
+}
+// hidden set-up scenes run first and are trimmed from the video (no loading states on camera)
+const hidden = scenes.filter((s) => s.hidden)
+for (const s of hidden) { await page.goto(abs(s.url)); current = abs(s.url); await act(s) }
+const visible = scenes.filter((s) => !s.hidden)
+scenes.length = 0
+scenes.push(...visible)
+const t0 = Date.now()
+const trimStart = (t0 - tCtx) / 1000
+const starts = []
 for (const s of scenes) {
   const start = (Date.now() - t0) / 1000
   starts.push(start)
@@ -93,7 +113,8 @@ const total = (Date.now() - t0) / 1000
 const recorded = await page.video().path()
 await ctx.close()
 await browser.close()
-renameSync(recorded, join(WORK, 'screen.webm'))
+renameSync(recorded, join(WORK, 'raw.webm'))
+execFileSync(FFMPEG, ['-y', '-loglevel', 'error', '-ss', trimStart.toFixed(2), '-i', join(WORK, 'raw.webm'), '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '32', '-deadline', 'realtime', join(WORK, 'screen.webm')])
 
 // 3) narration track + 4) mux
 const inputs = scenes.flatMap((s) => ['-i', join(WORK, `${s.id}.wav`)])
