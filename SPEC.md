@@ -1,4 +1,4 @@
-# Claimdesk — SPEC (SDD, v0.3 2026-10-04)
+# Claimdesk — SPEC (SDD, v0.4 2026-10-04)
 
 ## 0. One line
 Pay every winner by link: an organizer locks each award on Tempo when it announces winners; each winner opens their link once and registers a passkey account; clearing that winner's paperwork pays exactly that account in the same transaction — no gas, no seed phrase, no "send us your wallet address" email.
@@ -9,10 +9,10 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 - Receipt shows: amount, token, tx hash, block time (UTC), memo, and the amount in the winner's local currency at the block date (ECB reference rate) with the rate's source and date.
 - All tests green (contract + TypeScript) · pitch ≤ 3:00 · demo ≤ 3:00.
 - Deadline: contest ends 2026-10-12 23:59 PT (= 2026-10-13 15:59 KST); internal freeze 2026-10-11 20:00 KST.
-- Non-goals (v0.2): real KYC vendor, tax advice, mainnet funds, fiat off-ramp, multi-chain.
+- Non-goals (v0.4): a real KYC vendor (a stand-in paperwork form feeds the console), tax advice, mainnet funds, fiat off-ramp, multi-chain.
 
 ## 2. Constraints
-- Solo builder, ~7 days. Chain: Tempo (Moderato testnet, chain id 42431). Token: any TIP-20 (pathUSD on testnet).
+- Solo builder; build sprint started 2026-10-04; contest ends 2026-10-12 PT. Chain: Tempo (Moderato testnet, chain id 42431). Token: any TIP-20 (pathUSD on testnet).
 - No accounts or API keys: public RPC, public faucet RPC (`tempo_fundAddress`), a dedicated fee-payer key (Tempo native fee sponsorship) separate from the organizer key; static winner pages may use Tempo's public testnet sponsor.
 - Domain code knows nothing about viem, HTTP or files.
 
@@ -62,10 +62,13 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 - AC-11 Given a registered account, when the organizer clears naming that account, then it is paid in the clearing transaction; naming any other account reverts `RecipientMismatch`; the link cannot register again (`WrongState`); only the registered account can move it (`changeRecipient`).
 - AC-12 Given a funded award, when revoked, then the organizer is repaid now and register/claim revert; revoke after clearance reverts `WrongState`.
 - AC-13 Given a forwarded link that registered first, when the organizer reissues the link, then the registration is wiped, the old key's signatures revert, and the winner registers with the new link. After clearance the organizer can neither revoke nor reissue.
-- AC-16 Given a withholding at clearance, the tax account receives it and the winner receives the rest, both with the award memo; the receipt shows gross, withheld and net.
-- AC-17 The organizer console answers only loopback requests with an allowed Host, same origin and the session token; the winner relay process never holds the organizer key.
 - AC-14 Sponsorship policy: exactly one `register()`/`claim()` call into an own escrow, gas ≤ 1.2M, no key authorizations, simulation succeeds, ≤ 30 requests/min/IP.
 - AC-15 Given no reference rate for the winner's currency, the receipt is shown in USD only (never an error after the money moved).
+- AC-16 Given a withholding at clearance up to the escrow's fixed cap, the fixed tax account receives it and the winner the rest, both with the award memo; above the cap reverts `InvalidWithholding`; the receipt shows gross, withheld and net.
+- AC-17 The organizer console answers only loopback requests with an allowed Host, same origin and the session token; the winner relay process never holds the organizer key.
+- AC-18 The console's expected recipient comes from the winner's paperwork (inbox or pasted), never from chain state; a paperwork address that differs from the registered account is shown as a mismatch and clearing is disabled.
+- AC-19 The relay answers only eth_chainId / eth_fillTransaction / eth_sendRawTransaction(Sync); a call that would revert is never sponsored and never counts against the per-award budget.
+- AC-20 `fund()` accepts only TIP-20 precompile tokens (0x20c0… addresses); the escrow balance always equals the sum of open awards (invariant suite).
 
 ## 7. Architecture (Clean)
 ```
@@ -91,5 +94,6 @@ Domain and application import nothing from adapters/infrastructure (checked by a
 
 ## 11. Change log
 - v0.1 2026-10-04 — first spec: claim-link payouts for prize programs on Tempo.
-- v0.2 2026-10-04 — register-before-clear; revoke; batch funding; refusals mined on-chain; separate fee payer; account page; PDF receipt; static build.
-- v0.3 2026-10-04 — registration is write-once (Registered state; the account replaces the link key in the same slot); clear() names the expected recipient; reissueLink only before clearance; organizer cannot touch a cleared award; minTtl floor; withholding at clearance; relay/console split; paperwork records with verify.
+- v0.2 — register-before-clear; revoke; batch funding; refusals mined on-chain; separate fee payer; account page; PDF receipt; static build.
+- v0.3 — write-once registration (Registered state); clear() names the expected recipient; reissueLink before clearance only; withholding at clearance; relay/console split; paperwork records with verify.
+- v0.4 — tax account and withholding cap fixed at deploy; TIP-20-only funding; invariant suite; paperwork intake feeding the console's expected recipient; relay method allow-list, simulate-before-quota, trusted-proxy IPs; award page watches for the payment.
