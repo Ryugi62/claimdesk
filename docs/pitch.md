@@ -1,17 +1,19 @@
-# Pitch video script (≤ 3:00, voice-over on slides)
+# Pitch video script (≤ 3:00, voice-over on slides + 2 phone clips)
 
-Every line here is checked against `docs/live/*.json` and the README before recording.
+Every number below is in `docs/live/*.json`, the README or a cited source.
 
-| # | Slide | Narration |
+| # | Slide / clip | Narration |
 |---|---|---|
-| 1 | Rule 15(b), quoted on screen | Rule fifteen-b of this hackathon says: each winning team may be required to set up a wallet address, as directed by the administrator. Rule thirteen adds prize acceptance documents and due diligence. |
-| 2 | An inbox: "Please reply with your wallet address" ×N | Behind those lines, someone at every prize program is emailing winners in dozens of countries for addresses, tax forms and signatures, then pasting forty-two-character addresses into a wallet by hand. |
-| 3 | Founder: solo builder, engineering student, South Korea | I'm on the other side of that email. I'm a solo builder and engineering student in South Korea. I sell software abroad and enter global competitions, and today my money comes home through Paddle, then Payoneer with a hundred-dollar minimum and no payout in won, while a second account still waits on an identity check. |
-| 4 | Claimdesk: pay every winner by link | So I built Claimdesk. The organizer funds a payout batch once. Each winner gets a link. |
-| 5 | Phone: award card → passkey prompt → "Received in 1.7 s" | The winner opens it, touches their fingerprint, and the money arrives. The passkey is their account. No app, no seed phrase, no gas. The organizer pays the fee. |
-| 6 | "Money doesn't move until paperwork is cleared" | And the money cannot move until the organizer has cleared that winner's paperwork. That rule lives in the escrow contract, not in a spreadsheet. A link that has not been cleared pays nothing. A copied signature with a different address is refused. Unclaimed awards come back after expiry. |
-| 7 | Receipt with local currency | The winner gets a receipt with the amount in their own currency at the official reference rate on the payment date, ready for their tax filing. |
-| 8 | Why Tempo: memos · fee payer · passkeys | It's built on Tempo because the three things this needs are protocol features there: transfer memos for reconciliation, native fee sponsorship, and passkey accounts. |
-| 9 | Proof: Moderato tx links, 11 + 22 tests | It runs on Tempo testnet today: a passkey claim of a ten-thousand-dollar test award in under two seconds, with every refusal case on-chain and thirty-three tests. |
-| 10 | Market: wedge → Payoneer $87.5B, 120 bps | We start with programs that pay strangers: hackathons, bounty boards and grants. The same rail grows into cross-border payouts to contributors, a market where Payoneer alone moved eighty-seven and a half billion dollars last year at a one-point-two percent take rate. |
-| 11 | Next four weeks | Next: one real program as a pilot, mainnet, and identity and tax-form providers plugged in behind the paperwork gate. Claimdesk. Pay every winner by link. |
+| 1 | Devpost help page quote, highlighted | The biggest hackathon platform tells its winners: prize fulfillment can take up to sixty days from receipt of paperwork. And make sure your PayPal, Payoneer or Wise account is set up to receive dollars, or you may lose fees, or the prize. |
+| 2 | This hackathon's rule 15(b) | This hackathon says the same thing in its own rules: winners may be required to set up a wallet address, plus acceptance documents and due diligence. |
+| 3 | Two inboxes: "tax form" email, "wallet address" email | Every program that pays strangers runs this loop by hand. And the person whose paperwork was checked is never tied to the address that gets paid. |
+| 4 | Founder | I'm on the receiving side. I'm a solo builder and engineering student in South Korea. I've entered about a dozen global hackathons since August, and my own money comes home through Paddle and Payoneer, with a hundred-dollar minimum and no payout in won. |
+| 5 | Claimdesk logo: pay every winner by link | So I built Claimdesk. |
+| 6 | Phone clip: link → "Create my account" → fingerprint → "Account ready" | The organizer locks every award on Tempo the day it announces winners, in one transaction. The winner opens their link once and touches their fingerprint. That passkey is their account: no app, no seed phrase, no gas. |
+| 7 | Organizer console: "Clear paperwork" → phone: "$15,000 received" | When the organizer clears that winner's paperwork, the money lands in that exact account, in the same transaction. The paperwork and the payout are finally the same thing. |
+| 8 | Receipt PDF in won · account page "Send" | The winner gets a receipt in their own currency for their records, and can send the money on to an exchange, paying the tiny fee in the same dollars. |
+| 9 | Contract rules list with explorer links | The rules live in the contract: nothing pays before clearance, a copied link can't redirect the money, a failed check is revoked and refunded, unclaimed awards come back. Every one of those refusals is a real transaction on Tempo testnet. |
+| 10 | Why Tempo: memos · fee payer · passkeys · batch calls | It's built on Tempo because each piece is a protocol feature there: transfer memos, native fee sponsorship, passkey accounts and batched calls. |
+| 11 | Competition table | Claim links are instant but ungated. Payout platforms are gated but need the winner to onboard. Claimdesk is both: a stranger with no wallet, paid only after paperwork. |
+| 12 | Business: 0.5% per payout, $5–$50 · Payoneer $87.5B at 1.2% | Organizers pay half a percent per payout; winners pay nothing. We start with hackathons, bounties and grants, and the same flow pays contributors abroad, a market where Payoneer alone moved eighty-seven and a half billion dollars last year. |
+| 13 | Next 30 days | Next: one real program as a pilot, then mainnet with an identity and tax-form provider behind the clear button. Claimdesk: pay every winner by link. |
