@@ -7,25 +7,26 @@ interface ITIP20 {
     function transferFromWithMemo(address from, address to, uint256 amount, bytes32 memo) external returns (bool);
 }
 
-/// @title ClaimEscrow — pay prize winners by link, only after their paperwork is cleared.
-/// @notice Each award is locked up front (the winner can see it), and settles exactly once:
-///         - path A (default): the winner opens the link early and registers an account; the organizer's
-///           clearance of that winner's paperwork pays that exact account in the same transaction;
-///         - path B: no account registered → clearance opens a bearer claim for the link holder;
-///         - or the organizer revokes it before clearance, or reclaims it after expiry.
-///         The award id is its 32-byte reference and rides on every TIP-20 transfer as the memo.
+/// @title ClaimEscrow — pay prize winners by link, only after their paperwork is cleared for the account that gets paid.
+/// @notice Lifecycle of one award (id = its 32-byte reference, also the TIP-20 memo on every transfer):
+///   Funded ──register(link key)──► Registered ──clear(expected = that account)──► Claimed   (path A, paid in the clear tx)
+///   Funded ──clear(expected = 0)──► Cleared ──claim(link key)──► Claimed                    (path B, bearer)
+///   Funded|Registered ──revoke──► Revoked (money back now)      Funded|Registered|Cleared ──expiry──► reclaim
+///   Registration is write-once for the link; only the registered account itself can move it (changeRecipient);
+///   the organizer can reissue the link (new key, registration wiped) only before clearance.
 contract ClaimEscrow {
-    enum Status { None, Funded, Cleared, Claimed, Expired, Reclaimed, Revoked }
+    enum Status { None, Funded, Registered, Cleared, Claimed, Expired, Reclaimed, Revoked }
 
     struct Award {
-        address token;       // slot 0
-        uint96 amount;       // slot 0
-        address claimSigner; // slot 1 — address of the one-time key inside the claim link
-        uint64 expiresAt;    // slot 1
-        Status status;       // slot 1
-        address recipient;   // slot 2 — written only when the winner registers (path A)
+        address token;   // slot 0
+        uint96 amount;   // slot 0
+        address party;   // slot 1 — the link's claim key while Funded/Cleared; the registered account once Registered
+        uint64 expiresAt; // slot 1
+        Status status;   // slot 1
     }
 
+    /// @notice Shortest life an award can be funded with — a visible floor on how fast an organizer can take it back.
+    uint64 public immutable minTtl;
     uint64 public constant MAX_TTL = 366 days;
 
     address public organizer;
@@ -34,39 +35,35 @@ contract ClaimEscrow {
 
     event Funded(bytes32 indexed id, address indexed token, uint256 amount, uint64 expiresAt, address claimSigner);
     event Registered(bytes32 indexed id, address indexed recipient);
-    event Cleared(bytes32 indexed id, bytes32 paperworkHash, address recipient, uint256 withheld, address taxAccount);
     event RecipientChanged(bytes32 indexed id, address indexed previous, address indexed next);
-    event RecipientReset(bytes32 indexed id);
+    event LinkReissued(bytes32 indexed id, address claimSigner);
+    event Cleared(bytes32 indexed id, bytes32 paperworkHash, address recipient, uint256 withheld, address taxAccount);
     event Claimed(bytes32 indexed id, address indexed recipient, uint256 amount, bytes32 memo);
     event Revoked(bytes32 indexed id, uint256 amount);
     event Reclaimed(bytes32 indexed id, uint256 amount, bytes32 memo);
-    event SignerRotated(bytes32 indexed id, address claimSigner);
     event OrganizerProposed(address indexed next);
     event OrganizerChanged(address indexed previous, address indexed next);
 
     error NotOrganizer();
-    error AlreadyExists();
+    error NotRecipient();
     error UnknownAward();
-    error NotCleared();
-    error AlreadyCleared();
-    error AlreadySettled();
+    error WrongState();
     error Expired();
     error NotExpired();
     error BadClaimSignature();
-    error InvalidAward();
-    error TransferFailed();
-    error AlreadyRegistered();
     error RecipientMismatch();
-    error NotRecipient();
+    error InvalidAward();
     error InvalidWithholding();
+    error TransferFailed();
 
     modifier onlyOrganizer() {
         if (msg.sender != organizer) revert NotOrganizer();
         _;
     }
 
-    constructor(address organizer_) {
+    constructor(address organizer_, uint64 minTtl_) {
         organizer = organizer_ == address(0) ? msg.sender : organizer_;
+        minTtl = minTtl_;
         emit OrganizerChanged(address(0), organizer);
     }
 
@@ -74,74 +71,59 @@ contract ClaimEscrow {
 
     /// @notice Lock `amount` of `token` for one award, pulled from the organizer with the award id as memo.
     function fund(bytes32 id, address token, uint96 amount, uint64 expiresAt, address claimSigner) external onlyOrganizer {
-        if (awards[id].status != Status.None) revert AlreadyExists();
+        if (awards[id].status != Status.None) revert WrongState();
         if (
             id == bytes32(0) || token == address(0) || amount == 0 || claimSigner == address(0)
-                || expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_TTL
+                || expiresAt < block.timestamp + minTtl || expiresAt > block.timestamp + MAX_TTL
         ) revert InvalidAward();
-        awards[id] = Award(token, amount, claimSigner, expiresAt, Status.Funded, address(0));
+        awards[id] = Award(token, amount, claimSigner, expiresAt, Status.Funded);
         if (!ITIP20(token).transferFromWithMemo(msg.sender, address(this), amount, id)) revert TransferFailed();
         emit Funded(id, token, amount, expiresAt, claimSigner);
     }
 
-    /// @notice The organizer states this award's paperwork (tax form, identity check, acceptance) is complete.
-    /// @param paperworkHash   hash of the organizer's paperwork record — the record stays off-chain.
-    /// @param expectedRecipient the account the paperwork was checked against. Must equal the registered account
-    ///                          (path A, paid now) or be zero when nobody registered (path B, opens a bearer claim).
-    /// @param withheld        tax withheld at source, sent to `taxAccount` now with the award memo (0 for none).
+    /// @notice The paperwork (tax form, identity check, acceptance) is complete for `expectedRecipient`.
+    /// @param paperworkHash hash of the organizer's paperwork record — the record stays off-chain.
+    /// @param expectedRecipient the account the paperwork was checked against: the registered account (paid now),
+    ///                          or zero when nobody registered (opens a bearer claim). Anything else reverts.
+    /// @param withheld tax withheld at source, sent to `taxAccount` now with the award memo (0 for none).
     function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld, address taxAccount) external onlyOrganizer {
         Award storage a = _live(id);
-        if (a.status != Status.Funded) revert AlreadyCleared();
-        if (expectedRecipient != a.recipient) revert RecipientMismatch();
+        bool registered = a.status == Status.Registered;
+        if (!registered && a.status != Status.Funded) revert WrongState();
+        if (expectedRecipient != (registered ? a.party : address(0))) revert RecipientMismatch();
         if (withheld >= a.amount || (withheld > 0 && taxAccount == address(0))) revert InvalidWithholding();
-        emit Cleared(id, paperworkHash, a.recipient, withheld, taxAccount);
+        emit Cleared(id, paperworkHash, expectedRecipient, withheld, taxAccount);
         if (withheld > 0) {
             a.amount -= withheld;
             ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
         }
-        if (a.recipient != address(0)) {
-            _pay(id, a, a.recipient);
-        } else {
-            a.status = Status.Cleared;
-        }
+        if (registered) _pay(id, a, a.party);
+        else a.status = Status.Cleared;
     }
 
-    /// @notice Undo a registration before clearance (e.g. a forwarded link registered first) and issue a new link key
-    ///         in the same call, so no old register signature can be replayed.
-    function resetRecipient(bytes32 id, address newSigner) external onlyOrganizer {
+    /// @notice Before clearance: issue a new link key and wipe any registration (a leaked or forwarded link).
+    function reissueLink(bytes32 id, address newSigner) external onlyOrganizer {
         Award storage a = _live(id);
-        if (a.status != Status.Funded) revert AlreadyCleared();
-        if (newSigner == address(0) || newSigner == a.claimSigner) revert InvalidAward();
-        a.recipient = address(0);
-        a.claimSigner = newSigner;
-        emit RecipientReset(id);
-        emit SignerRotated(id, newSigner);
+        if (a.status != Status.Funded && a.status != Status.Registered) revert WrongState();
+        if (newSigner == address(0)) revert InvalidAward();
+        a.party = newSigner;
+        a.status = Status.Funded;
+        emit LinkReissued(id, newSigner);
     }
 
-    /// @notice Cancel an award before its paperwork is cleared (e.g. failed due diligence). Funds return now.
-    ///         After clearance the award can no longer be withdrawn by the organizer — that is the commitment.
+    /// @notice Before clearance (e.g. failed due diligence): cancel and return the money now.
     function revoke(bytes32 id) external onlyOrganizer {
         Award storage a = _known(id);
-        if (a.status == Status.Cleared) revert AlreadyCleared();
-        if (a.status != Status.Funded) revert AlreadySettled();
+        if (a.status != Status.Funded && a.status != Status.Registered) revert WrongState();
         a.status = Status.Revoked;
         ITIP20(a.token).transferWithMemo(organizer, a.amount, id);
         emit Revoked(id, a.amount);
     }
 
-    /// @notice Replace the claim key of a leaked or lost link (before the award settles).
-    function rotateSigner(bytes32 id, address newSigner) external onlyOrganizer {
-        Award storage a = _known(id);
-        if (a.status != Status.Funded && a.status != Status.Cleared) revert AlreadySettled();
-        if (newSigner == address(0)) revert InvalidAward();
-        a.claimSigner = newSigner;
-        emit SignerRotated(id, newSigner);
-    }
-
     /// @notice After expiry, return an unsettled award to the organizer (with its memo).
     function reclaim(bytes32 id) external onlyOrganizer {
         Award storage a = _known(id);
-        if (a.status != Status.Funded && a.status != Status.Cleared) revert AlreadySettled();
+        if (!_unsettled(a.status)) revert WrongState();
         if (block.timestamp < a.expiresAt) revert NotExpired();
         a.status = Status.Reclaimed;
         ITIP20(a.token).transferWithMemo(organizer, a.amount, id);
@@ -162,47 +144,40 @@ contract ClaimEscrow {
 
     // ------------------------------------------------------------------ winner (anyone may submit; the link's key decides)
 
-    /// @notice Path A: the link holder names the account to be paid when paperwork clears. Write-once:
-    ///         after this, only that account itself (changeRecipient) — never the link — can move it.
+    /// @notice Path A: the link holder names the account to be paid. Write-once — afterwards the link has no power.
     function register(bytes32 id, address recipient, bytes calldata signature) external {
         Award storage a = _live(id);
-        if (a.status != Status.Funded) revert AlreadyCleared();
-        if (a.recipient != address(0)) revert AlreadyRegistered();
-        if (recipient == address(0) || _recover(registerDigest(id, recipient), signature) != a.claimSigner) {
-            revert BadClaimSignature();
-        }
-        a.recipient = recipient;
+        if (a.status != Status.Funded) revert WrongState();
+        if (recipient == address(0) || _recover(registerDigest(id, recipient), signature) != a.party) revert BadClaimSignature();
+        a.party = recipient; // the link key is retired in the same slot
+        a.status = Status.Registered;
         emit Registered(id, recipient);
     }
 
     /// @notice The registered account moves the payout to another account it controls (before clearance).
     function changeRecipient(bytes32 id, address next) external {
         Award storage a = _live(id);
-        if (a.status != Status.Funded) revert AlreadyCleared();
-        if (msg.sender != a.recipient || a.recipient == address(0)) revert NotRecipient();
+        if (a.status != Status.Registered) revert WrongState();
+        if (msg.sender != a.party) revert NotRecipient();
         if (next == address(0)) revert InvalidAward();
-        emit RecipientChanged(id, a.recipient, next);
-        a.recipient = next;
+        emit RecipientChanged(id, a.party, next);
+        a.party = next;
     }
 
     /// @notice Path B: pay a cleared award that had no registered account to the recipient the link's key signed for.
     function claim(bytes32 id, address recipient, bytes calldata signature) external {
         Award storage a = _live(id);
-        if (a.status != Status.Cleared) revert NotCleared();
-        if (recipient == address(0) || _recover(claimDigest(id, recipient), signature) != a.claimSigner) {
-            revert BadClaimSignature();
-        }
+        if (a.status != Status.Cleared) revert WrongState();
+        if (recipient == address(0) || _recover(claimDigest(id, recipient), signature) != a.party) revert BadClaimSignature();
         _pay(id, a, recipient);
     }
 
     // ------------------------------------------------------------------ views
 
-    /// @notice Effective status: Funded/Cleared awards past expiry read as Expired.
+    /// @notice Effective status: unsettled awards past expiry read as Expired.
     function statusOf(bytes32 id) external view returns (Status) {
         Award storage a = awards[id];
-        if ((a.status == Status.Funded || a.status == Status.Cleared) && block.timestamp >= a.expiresAt) {
-            return Status.Expired;
-        }
+        if (_unsettled(a.status) && block.timestamp >= a.expiresAt) return Status.Expired;
         return a.status;
     }
 
@@ -210,17 +185,19 @@ contract ClaimEscrow {
         return awards[id];
     }
 
-    /// @notice What the claim key signs to pay `recipient` (EIP-191 over a domain tag, this escrow, chain, award, recipient).
     function claimDigest(bytes32 id, address recipient) public view returns (bytes32) {
         return _digest("claimdesk.claim", id, recipient);
     }
 
-    /// @notice What the claim key signs to register `recipient` as the account to be paid.
     function registerDigest(bytes32 id, address recipient) public view returns (bytes32) {
         return _digest("claimdesk.register", id, recipient);
     }
 
     // ------------------------------------------------------------------ internals
+
+    function _unsettled(Status s) private pure returns (bool) {
+        return s == Status.Funded || s == Status.Registered || s == Status.Cleared;
+    }
 
     function _known(bytes32 id) private view returns (Award storage a) {
         a = awards[id];
@@ -230,7 +207,7 @@ contract ClaimEscrow {
     /// @dev Known, unsettled and not expired.
     function _live(bytes32 id) private view returns (Award storage a) {
         a = _known(id);
-        if (a.status != Status.Funded && a.status != Status.Cleared) revert AlreadySettled();
+        if (!_unsettled(a.status)) revert WrongState();
         if (block.timestamp >= a.expiresAt) revert Expired();
     }
 
@@ -251,8 +228,7 @@ contract ClaimEscrow {
         bytes32 s = bytes32(sig[32:64]);
         uint8 v = uint8(sig[64]);
         if (v < 27) v += 27;
-        // reject malleable signatures (upper half s)
-        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) return address(0);
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) return address(0); // malleable
         return ecrecover(digest, v, r, s);
     }
 }
