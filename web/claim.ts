@@ -66,7 +66,7 @@ async function main() {
 
 async function showReceipt(ref: string, tx: string, ms?: number) {
   const r = await (await fetch(`/api/receipt?ref=${encodeURIComponent(ref)}&tx=${tx}&currency=${localCurrency}`)).json()
-  const local = r.local ? `<div class="local">≈ ${esc(r.local.amountText)} ${esc(r.local.currency)}</div><p>at the ECB reference rate of ${esc(r.local.rateDate)} (1 USD = ${r.local.rate} ${esc(r.local.currency)})</p>` : ''
+  const local = r.local ? `<div class="local">≈ ${esc(r.local.amountText)} ${esc(r.local.currency)}</div><p>at the ECB reference rate of ${esc(r.local.rateDate)} (1 USD = ${Number(r.local.rate).toLocaleString('en-US')} ${esc(r.local.currency)})</p>` : ''
   app.innerHTML = `<div class="program">${esc(r.program)}</div><div class="amount">$${esc(r.amountText)}</div><div class="unit">${esc(r.symbol)} received${ms ? ` in ${(ms / 1000).toFixed(1)} s` : ''} · network fee paid by the organizer</div>
   <span class="chip ok">Received</span>
   ${r.local ? `<div class="card"><div class="program">For your records</div>${local}</div>` : ''}

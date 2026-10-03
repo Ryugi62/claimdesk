@@ -50,7 +50,7 @@ describe('payout flow with fakes (no network)', () => {
     const pay = { ref: 'WF-01', amount: 1_500_000n, decimals: 6, symbol: 'pathUSD', tx: tx('0xp'), memo: ('0x' + '57'.padEnd(64, '0')) as Hex, recipient: ESCROW }
     expect((await receiptFor(pay, undefined, undefined)).local).toBeUndefined()
     const fx = { usdTo: async (c: string, d: string) => ({ currency: c, rate: 1400, rateDate: d, source: 'test' }) }
-    expect((await receiptFor(pay, fx, 'KRW')).local?.amountText).toBe('2,100.00')
+    expect((await receiptFor(pay, fx, 'KRW')).local?.amountText).toBe('2,100')
   })
 })
 

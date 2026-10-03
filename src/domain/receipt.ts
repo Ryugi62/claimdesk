@@ -39,18 +39,23 @@ export function formatUnits(value: bigint, decimals: number): string {
   return (neg ? '-' : '') + whole.toString() + (frac ? '.' + frac : '')
 }
 
-function group2(value: bigint, decimals: number): string {
-  // round half up to 2 decimals, then add thousands separators
+/** ISO 4217 currencies without minor units that a winner is likely to file in. */
+const ZERO_DECIMAL = new Set(['KRW', 'JPY', 'VND', 'IDR', 'CLP', 'ISK', 'HUF', 'TWD'])
+export const minorUnits = (currency: string) => (ZERO_DECIMAL.has(currency) ? 0 : 2)
+
+function group(value: bigint, decimals: number, places = 2): string {
+  // round half up to `places`, then add thousands separators
   const scale = 10n ** BigInt(decimals)
-  const cents = (value * 100n + scale / 2n) / scale
-  const whole = (cents / 100n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  return `${whole}.${(cents % 100n).toString().padStart(2, '0')}`
+  const unit = 10n ** BigInt(places)
+  const minor = (value * unit + scale / 2n) / scale
+  const whole = (minor / unit).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return places === 0 ? whole : `${whole}.${(minor % unit).toString().padStart(places, '0')}`
 }
 
 export function buildReceipt(p: Payment, fx?: FxQuote): Receipt {
   const receipt: Receipt = {
     ref: p.ref,
-    amountText: group2(p.amount, p.decimals),
+    amountText: group(p.amount, p.decimals),
     symbol: p.symbol,
     txHash: p.txHash,
     blockTimeUtc: p.blockTime.toISOString(),
@@ -63,7 +68,7 @@ export function buildReceipt(p: Payment, fx?: FxQuote): Receipt {
     // rate as a fixed-point integer with 6 decimals — no float drift on the money
     const rateMicro = BigInt(Math.round(fx.rate * 1e6))
     const local = p.amount * rateMicro // decimals: p.decimals + 6
-    receipt.local = { ...fx, amountText: group2(local, p.decimals + 6) }
+    receipt.local = { ...fx, amountText: group(local, p.decimals + 6, minorUnits(fx.currency)) }
   }
   return receipt
 }

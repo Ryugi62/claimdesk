@@ -49,7 +49,7 @@ Testnet only: test stablecoins from the public faucet, testnet keys created by t
 ```bash
 npm install
 forge test                          # 11 contract tests (Foundry)
-npm test                            # 21 TypeScript tests (domain, application, adapters, sponsorship policy)
+npm test                            # 22 TypeScript tests (domain, application, adapters, sponsorship policy)
 npm run e2e:moderato                # the whole flow on Tempo testnet, writes docs/live/moderato-*.json
 
 # organizer + winner by hand

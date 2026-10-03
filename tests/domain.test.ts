@@ -74,11 +74,16 @@ describe('AC-8 receipt', () => {
       ref: 'WF-01', amount: 10_000_000_000n, decimals: 6, symbol: 'pathUSD', txHash: '0xtx', blockTime: new Date('2026-10-05T03:00:00Z'), memo: awardMemo('WF-01'), recipient: '0xr',
     }, { currency: 'KRW', rate: 1391.25, rateDate: '2026-10-02', source: 'ECB reference rate via frankfurter.app' })
     expect(r.amountText).toBe('10,000.00')
-    expect(r.local).toEqual({ currency: 'KRW', rate: 1391.25, rateDate: '2026-10-02', source: 'ECB reference rate via frankfurter.app', amountText: '13,912,500.00' })
+    expect(r.local).toEqual({ currency: 'KRW', rate: 1391.25, rateDate: '2026-10-02', source: 'ECB reference rate via frankfurter.app', amountText: '13,912,500' })
   })
   it('refuses a rate dated after the payment', () => {
     expect(() => buildReceipt({ ref: 'A', amount: 1n, decimals: 6, symbol: 'x', txHash: '0x', blockTime: new Date('2026-10-01T00:00:00Z'), memo: awardMemo('A'), recipient: '0x' },
       { currency: 'KRW', rate: 1, rateDate: '2026-10-02', source: 's' })).toThrow(/after/)
+  })
+  it('uses two decimals for currencies with minor units', () => {
+    const r = buildReceipt({ ref: 'A', amount: 1_000_000n, decimals: 6, symbol: 'x', txHash: '0x', blockTime: new Date('2026-10-05T00:00:00Z'), memo: awardMemo('A'), recipient: '0x' },
+      { currency: 'EUR', rate: 0.8526, rateDate: '2026-10-02', source: 's' })
+    expect(r.local?.amountText).toBe('0.85')
   })
   it('formats base units exactly', () => {
     expect(formatUnits(1_234_567n, 6)).toBe('1.234567')
