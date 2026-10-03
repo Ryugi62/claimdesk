@@ -2,106 +2,112 @@
 
 # Claimdesk — pay every winner by link
 
-**Prize, bounty and grant programs lock each award on Tempo the day they announce it. The winner opens one link and touches their fingerprint — that passkey is their account, no app, no seed phrase, no gas. When the organizer clears that winner's paperwork, the money lands in that exact account in the same transaction. Nobody emails a wallet address, and nobody waits 60 days.**
+**Hackathons, bounty boards and grant programs lock each award on Tempo when they announce it. The winner opens one link and touches their fingerprint — that passkey becomes their account. When the organizer approves the paperwork *for that account*, the same transaction pays it. No wallet-address emails, no gas, no 60-day wait.**
 
-Crypto World's Fair Hackathon (Colosseum, Fall 2026) · **Tempo track** · solo founder, university student · all code written during the hackathon (first commit 2026-10-04 — `git log`).
+Crypto World's Fair Hackathon (Colosseum, Fall 2026) · **Tempo track** · solo founder, university student · all code written during the hackathon (`git log`).
 
-## The problem, in the industry's own words
+## The problem, in the operators' own words
 > "The prize fulfillment process can take up to 60 days from receipt of paperwork." … "make sure that your PayPal/Payoneer/Wise account is fully set up, that it can receive international transfers … If your prize is undeliverable, you may incur fees … or be delaying or forfeiting receipt of the prize." — Devpost Help Center, *How to Claim Your Hackathon Cash Prize* (updated 2026-08-21)
 >
 > "A lead from Superteam will reach out to the winners with a payment form. Fill in that form and expect to receive the reward within 7 days of submitting the form. Note that the winner needs to complete KYC" — Superteam Earn FAQ (read 2026-10-04)
 >
 > "Each winning team may be required to set up a wallet address, as directed by Administrator." — this hackathon's Official Rules §15(b); §13 adds "Prize Acceptance Documents" and "due diligence".
 
-Every program that pays strangers runs the same loop by hand: collect a tax form and identity check, then collect a payout address (or a PayPal/Payoneer/Wise account that must already exist and accept USD), then pay, then reconcile. The payout address and the paperwork arrive through different emails, so nothing ties the person who was checked to the account that gets paid.
+Every program that pays strangers runs the same loop by hand: a payment form, a tax form and an identity check, then a payout address or a PayPal/Payoneer/Wise account that must already accept USD, then the payment, then reconciliation. The address and the paperwork travel separately, so nothing proves the person who was checked owns the account that gets paid.
 
-I'm on the receiving end of that loop. I'm a solo builder and engineering student in South Korea; I sell software abroad and have entered about a dozen global hackathons since August. My own money comes home through Paddle → Payoneer ($100 minimum, no payout in KRW) → bank, and a Wise account still waits on an identity check.
+I'm on the receiving end. I'm a solo builder and engineering student in South Korea who sells software abroad and has entered about a dozen global hackathons since August. Each has its own payout rules — Devpost's prize desk, Superteam's payment form, this hackathon's wallet clause — and my own Payoneer route has a $100 minimum and no payout in won.
 
-## How Claimdesk works
+## How it works
 ```
-organizer                               escrow on Tempo                              winner
-winners.csv ─► fund N awards ─────────► Funded      (one batched transaction; id = 32-byte memo)
-send links (mail-merge CSV) ─────────────────────────────────────────────────────────► opens link once
-                                        Registered  ◄── register(me) signed by the link's one-time key,
-                                                        sent by the new passkey account, fee sponsored
-paperwork done ─► clear(award, hash) ─► Claimed     ── TIP-20 transferWithMemo ────► paid, in the same tx
-                                                                                      receipt PDF (local currency)
-                                                                                      account page: send to exchange
-no account yet? clear opens a bearer claim → link holder receives with a passkey (fee sponsored)
-failed due diligence? revoke() before clearance → money back now      unclaimed? reclaim() after expiry
+organizer                                   escrow on Tempo                                   winner
+winners.csv ─► fund N awards (1 tx) ──────► Funded       id = award ref = 32-byte transfer memo
+mail-merge the links ─────────────────────────────────────────────────────────────────────────► opens link once
+                                            Registered   ◄─ register(me): link key signs, passkey account sends,
+                                                            organizer's relay pays the fee. Write-once.
+check paperwork for THAT address ─► clear(award, recordHash, expected = that address [, withholding])
+                                            Claimed      ─► TIP-20 transferWithMemo to that account, same tx
+                                                            receipt (local currency) · account page · send on
 ```
-- **The paperwork binds to the account that gets paid.** The winner registers their account through the link *before* paperwork; the organizer's identity/tax check can show that address; `clear()` pays exactly it. A forwarded link after registration can't redirect the money.
-- **A visible commitment.** Funds are locked from announcement day, and once paperwork is cleared the organizer can no longer revoke.
-- **Link = authority, not a server.** The claim key lives in the URL fragment (never sent to a server). Register and claim signatures are domain-separated, bound to escrow + chain + award + recipient; malleable signatures are rejected.
-- **Winner pays nothing and installs nothing.** WebAuthn passkey = Tempo account. The organizer's relay co-signs fees only for one `register()`/`claim()` call into its own escrow, after simulating it, with a gas cap and per-IP rate limit, using a fee-payer key separate from the organizer key.
-- **The money doesn't dead-end.** The account page signs in with the same passkey (or recovers it on a new browser from two signatures) and sends to an exchange deposit address with a memo/tag — the fee is paid in the stablecoin itself, because Tempo has no gas token.
-- **Reconciliation for free.** The award reference rides as the TIP-20 memo; the organizer console is rebuilt from escrow events, not a database.
+- **Paperwork is bound to the account that gets paid.** Registration is write-once: after it, the link has no power, and only the registered account itself can move the payout (`changeRecipient`). `clear()` must name the account the paperwork was checked for — if a forwarded link registered first, clearing reverts `RecipientMismatch` and the organizer reissues the link.
+- **A commitment the winner can see.** Funds are locked from announcement day; every award has an on-chain expiry floor (`minTtl`); after clearance the organizer can no longer revoke, reissue or redirect.
+- **Withholding at source, in the same transaction.** Programs that must withhold tax pass the amount and a tax account to `clear()`; both legs carry the award memo and the receipt shows gross, withheld and net.
+- **Winner pays nothing and installs nothing.** The WebAuthn passkey *is* the Tempo account. The relay co-signs fees only for one `register`/`claim` call into its own escrow that simulates successfully, with gas and fee caps, a pinned fee token, per-IP and per-award limits — and it holds only a small fee-payer key, never the organizer key.
+- **The money doesn't dead-end.** The account page (passkey sign-in, or recovery on a new browser from two signatures) sends to any wallet or exchange deposit address with a memo/tag, paying the fee in the stablecoin itself. Kraken has supported stablecoin deposits on Tempo since June 2026.
+- **Auditable paperwork.** The organizer's note stays on the organizer's machine (append-only, owner-only); only a salted hash goes on-chain, and `verify` re-derives it.
+- **Reconciliation for free.** Every transfer carries the award ref as its memo; the organizer console is rebuilt from escrow events, not a database.
 
 ## Why Tempo
-Transfer memos, native fee sponsorship (fee-payer signature on the transaction — no paymaster, bundler or EntryPoint), WebAuthn passkey accounts, batched calls and stablecoin fee tokens are protocol features on Tempo. Claimdesk is those features pointed at one job. Next: TIP-403 receive policies as a second compliance layer and virtual addresses for per-program funding.
+Each piece is a protocol feature on Tempo: TIP-20 transfer memos, native fee sponsorship (a fee-payer signature on the transaction — no paymaster, bundler or EntryPoint), WebAuthn passkey accounts, batched calls (fund or clear many awards in one transaction), and stablecoin fee tokens. Next: TIP-403 receive policies as a second compliance layer, and access keys so the organizer key can stay cold.
 
 ## Proof — Tempo Moderato testnet (chain 42431)
-All of these are mined transactions; refusals are real reverted transactions, not simulations.
+All mined. Refusals are real reverted transactions, not simulations.
 
 | What | Transaction |
 |---|---|
-| 4 awards funded in one batched transaction (≈532k gas per award) | [`0xdbfb5377…6bc6e7`](https://explore.testnet.tempo.xyz/tx/0xdbfb5377640bc497db8fb3c680cc4cc83f9e7f8c049403138922066d806bc6e7) |
-| Path A: winner registers (sponsored) → organizer clears → winner 0 → 25 paid in the clearing tx | [register](https://explore.testnet.tempo.xyz/tx/0x21d3032d4b2a062582b5c465678c4a579dc808ea1a4c3dfdf5b475ec94c40fd9) · [clear+pay](https://explore.testnet.tempo.xyz/tx/0x72ecfd5c3562a80e75883f9aa8cce8de3acb093ee8141cab0a58c2d9ae1319bc) |
-| Path B: sponsored bearer claim after clearance (0 → 15) | [`0xb5b42d74…000185`](https://explore.testnet.tempo.xyz/tx/0xb5b42d7443d5b08775775e1a10ea16934212b645008b97eb3f35ddeae4000185) |
-| Refused: before paperwork `NotCleared` · twice `AlreadySettled` · copied signature to another address `BadClaimSignature` · after revoke `AlreadySettled` · after expiry `Expired` | [1](https://explore.testnet.tempo.xyz/tx/0x92b1094eaeae52755cddf1ab0751bf245b8a874ded433afaaa5649754e1567b0) · [2](https://explore.testnet.tempo.xyz/tx/0x5766a4e671d2acb8fc2bae594428998a0d54ae0dc87099a189b22af4ca23cb8e) · [3](https://explore.testnet.tempo.xyz/tx/0x7180533b62b084a3526f3528f4660d0a2a928e62ccf17e7b86654d098369191d) · [4](https://explore.testnet.tempo.xyz/tx/0x5585647c7549b755fb8b08a688d7aac158913078e5fee4d2658d396041289d84) · [5](https://explore.testnet.tempo.xyz/tx/0xe3ccf2c3c91baca6f8fe89f44232464340ea77afd3e4ff74a4a56a7266251269) |
-| Revoke (money back now) · reclaim after expiry | [revoke](https://explore.testnet.tempo.xyz/tx/0x03a862fc5e1b8df3ff02e85d102be7b55ce63f5bae603551702c4149ae6cc259) · [reclaim](https://explore.testnet.tempo.xyz/tx/0x628731edf73f56fae51f4ce7f1798553c43b1b6a2a307c2834e33152e0e6cb49) |
-| Web, passkey: register in 2.8 s → clear → $15,000 test award paid, receipt ≈ 20,224,200 KRW, PDF | [clear+pay](https://explore.testnet.tempo.xyz/tx/0xb41f562c823afb618509a988e855a84791d9bda8cc9637e9f741a0df10a84038) · `docs/ui/receipt-sample.pdf` |
-| Web, passkey account sends 12.50 to an exchange-style address with a deposit tag, fee paid in the stablecoin | [`0xfb9c0314…05351a`](https://explore.testnet.tempo.xyz/tx/0xfb9c0314240080d6c5529a14cd84cfaf31e4c9f9e22eedee1e69f7b93c05351a) |
-| Web, passkey bearer claim of a cleared award in 2.5 s | [`0x215985d5…69fd3`](https://explore.testnet.tempo.xyz/tx/0x215985d505cf59539737a202ad163ed3219f8b73eb7e7182f2497a39f4b69fd3) |
+| 6 awards funded in one batched transaction (≈566k gas per award, 2 storage slots each) | [`0xc3edd119…2f1d85`](https://explore.testnet.tempo.xyz/tx/0xc3edd1193f6aa009ae011e0e753af0aaeab98f55ff38c9cf8865860dcc2f1d85) |
+| A · winner registers (fee sponsored) → organizer clears **for that account** → paid 0 → 25 in the clearing tx | [register](https://explore.testnet.tempo.xyz/tx/0xd5bd59340df1c84b6a72d923f5f22eb8f751ecd225a970524ccd224dd6d70cc7) · [clear+pay](https://explore.testnet.tempo.xyz/tx/0xce9f8dce118c0083d94398cb39ee31277e59b27743bd2a4a201e8620dc12c4e3) |
+| A · the same link tries to register another account → `WrongState` | [`0xb8eee46d…bbf070`](https://explore.testnet.tempo.xyz/tx/0xb8eee46d80f4b0683f6b154438fb811bd6bbe83d675584db79b33a337abbf070) |
+| F · a forwarded link registers first → organizer's clearance names the real winner → `RecipientMismatch` | [`0xffd299df…f2d4c6`](https://explore.testnet.tempo.xyz/tx/0xffd299df93cfdacfd855d375768748a6e7048f834f136e1055c7de1199f2d4c6) |
+| F · organizer reissues the link → old link `BadClaimSignature` → winner registers with the new link → paid; forwardee got 0 | [reissue](https://explore.testnet.tempo.xyz/tx/0x249a5269991bd962e73735e996e2d76702e73605cddc1c62ec567229689a327c) · [old link](https://explore.testnet.tempo.xyz/tx/0x865e3d5b949e36808829734761cfcd3d312a0bda56c91bfff97139117cce4f89) · [clear+pay](https://explore.testnet.tempo.xyz/tx/0xcf10a4c8ac9531adfbcac4ac5fd93efc540f00eddc9cdcea008023b5f8a1aa2a) |
+| G · clearance with 30% withheld → 30 to the tax account, 70 to the winner, both with the award memo | [`0xaf1256f0…6e69c7`](https://explore.testnet.tempo.xyz/tx/0xaf1256f07971788f0b5a65e4487a44f5603f912b4a3a88679eb9087f386e69c7) |
+| B · bearer: before clearance `WrongState` → claim after clearance (sponsored, 1.572 s) → twice `WrongState` | [before](https://explore.testnet.tempo.xyz/tx/0xb39d0da97409ba568e719369aee0d23189b481b6e051a7823c5031b6e68f4553) · [paid](https://explore.testnet.tempo.xyz/tx/0xd99c99958385b4d63ff258bf1bee4ced9dafcb867276781ef589c0a2ff7afdff) · [twice](https://explore.testnet.tempo.xyz/tx/0xe0be6fb9c801a0c2fdc31ba9960aa9760df0f43989b5cf9a5198da58ad6f84a7) |
+| E · copied claim signature, different recipient → `BadClaimSignature` | [`0xde04acbc…19235c`](https://explore.testnet.tempo.xyz/tx/0xde04acbc9572f54be25814f7c55ae2710fc60a30d6f46661e7d412510419235c) |
+| C · revoke before clearance (money back now) → register afterwards `WrongState` | [revoke](https://explore.testnet.tempo.xyz/tx/0xb3871344b9e8f80b7f72cdd25c7c32fa36a406d6fcdee79e3da547e777cb7090) · [refused](https://explore.testnet.tempo.xyz/tx/0x441cfb2d5fcc5d45e195c68e541d5ca0642b7a2bfe6f20ca94ff713eeec62272) |
+| D · claim after expiry `Expired` → organizer reclaims | [refused](https://explore.testnet.tempo.xyz/tx/0x59149b22e6b6c1f297e5d74a02fc82e917a90173223cc7d668d7f2d2ebcb8684) · [reclaim](https://explore.testnet.tempo.xyz/tx/0x1b3a391da8ce1946c6ab4e989858363a73d3c109331977610898acd502fb1c14) |
+| Web · **passkey** account registers (3.399 s, WebAuthn signature + fee-payer signature) | [register](https://explore.testnet.tempo.xyz/tx/0xbc2906273f9d2403b044c703589f78dd2ef043b416397a2af87d878d7348b3d2) |
+| Web · console clears for that address → **$15,000** test award paid; receipt ≈ 20,224,200 KRW + PDF | [clear+pay](https://explore.testnet.tempo.xyz/tx/0x8e1cbfb905add72b504505540ec106a4fb908377bc233f19e9123ee91d3d1f3d) · `docs/ui/receipt-sample.pdf` |
+| Web · passkey account sends 12.50 with an exchange deposit tag, fee paid in the stablecoin | [send](https://explore.testnet.tempo.xyz/tx/0xb0abb515dc31aedb15110557e907b96ac8dcfa2cbe3d5b99b6b0937ed03bd6fd) |
+| Web · passkey bearer claim of a cleared award (3.872 s end to end) | [claim](https://explore.testnet.tempo.xyz/tx/0x2f57aa4208a832e26edee575f01262603eb3dc81afa11fc6db4a0628119a68ce) |
 
-Logs: `docs/live/moderato-2026-10-03T22-37-13-930Z.json` (contract paths) · `docs/live/web-2026-10-03T22-39-42-632Z.json` (browser, Chromium virtual WebAuthn authenticator). Screens: `docs/ui/`. Testnet only — test stablecoins from the public faucet; no real funds.
+Logs: `docs/live/moderato-2026-10-03T23-01-23-235Z.json` (contract paths) · `docs/live/web-2026-10-03T23-04-58-373Z.json` (browser; Chromium virtual WebAuthn authenticator). Screens: `docs/ui/`. Testnet only — faucet stablecoins, no real funds.
 
 ## Run it (no accounts, no API keys)
 ```bash
 npm install
-forge test                      # 27 contract tests incl. a fuzzed conservation invariant (Foundry)
-npm test                        # TypeScript tests: domain, application, adapters, sponsorship policy
-npm run e2e:moderato            # the whole contract story on Tempo testnet → docs/live/moderato-*.json
+forge test                     # 22 contract tests incl. the forwarded-link front-run and a fuzzed conservation invariant
+npm test                       # TypeScript tests: domain, application, adapters, relay policy, console guard, paperwork records
+npm run e2e:moderato           # the whole contract story on Tempo testnet → docs/live/moderato-*.json
 
-npm run cli -- deploy           # escrow + organizer key + separate fee-payer key (testnet faucet)
-npm run cli -- batch examples/worldsfair-demo.csv --days 14     # one transaction; private links → batches/
-npm run serve                   # organizer console http://localhost:5174 · winner pages /claim#… /account
-node scripts/web-claim.mjs batches/<file>.links.json <REF> <CLEARED_REF>   # drives the passkey flows
-npm run build                   # static winner pages (dist/) for any static host, using Tempo's public testnet sponsor
+npm run cli -- deploy          # escrow + organizer key + separate fee-payer key (testnet faucet)
+npm run cli -- batch examples/worldsfair-demo.csv --days 14   # one transaction; private links → batches/ (owner-only)
+npm run relay                  # winner pages + sponsoring relay  http://localhost:5174  (fee-payer key only)
+npm run console                # organizer console (organizer key, local only) — open the printed URL with its token
+node scripts/web-claim.mjs batches/<file>.links.json <REF> <OTHER_REF> "<console URL>"   # drives the passkey flows
+npm run build                  # static winner pages (dist/) for any host, using Tempo's public testnet sponsor
 ```
 
 ## Competition
 | | Pay a stranger with no wallet | Paperwork gates the payout | Paperwork bound to the paid account | Reconciliation | Time to paid |
 |---|---|---|---|---|---|
-| Devpost-style prize desk (forms + PayPal/Payoneer/Wise) | no — winner must already have an account that accepts USD | manual | no (separate emails) | manual | "up to 60 days" |
+| Prize desks (forms + PayPal/Payoneer/Wise) | no — needs an account that accepts USD | manual | no (separate emails) | manual | "up to 60 days" |
 | Claim links (Peanut, TipLink) | yes | no | no | no | instant, ungated |
-| Contractor/payout platforms (Deel, Request Finance, Payoneer) | needs onboarding | yes (their KYC) | yes | yes | days, recipient fees |
-| Bounty boards' built-in payouts (e.g. Superteam Earn) | wallet required | manual | manual | per platform | varies |
-| **Claimdesk** | **yes — passkey** | **yes — on-chain** | **yes — register before clear** | **memo + events** | **the clearing transaction** |
+| Payout platforms (Deel, Request Finance, Payoneer) | needs onboarding | yes | yes | yes | days |
+| Bounty boards' built-in payouts | wallet + payment form | manual | manual | per platform | "within 7 days" |
+| **Claimdesk** | **yes — passkey** | **yes — on-chain** | **yes — register → clear(expected)** | **memo + events** | **the clearing transaction** |
 
-Competitor columns reflect their public product pages as of October 2026.
+Competitor columns reflect their public pages as of October 2026.
 
 ## Business
-- **Wedge:** programs that pay many strangers once — hackathons, bounty boards, ecosystem grants. Colosseum alone runs two hackathons a year with dozens of winning teams (2,857 submissions from 150 countries last spring); Superteam Earn's public stats endpoint reports $15.9M in total value (read 2026-10-04).
-- **Price (plan, not yet charged):** organizer pays 0.5% per settled payout, $5 minimum, $50 cap; winners pay nothing. A 40-winner, $300k program ≈ $1,500 (40 × $37.50) — less than the operator time it replaces, and the fees the winners no longer lose.
-- **Where it grows:** the same flow (lock → collect account → clear → pay → reconcile) is how platforms pay contributors and creators abroad. Payoneer moved **$87.5B** in 2025 at a **120 bps** take rate (FY2025 results, SEC exhibit 99.1, 2026-02-26) — Claimdesk starts where the recipient has no account yet.
-- **Next 30 days:** one real program as a pilot (testnet first, then mainnet) · plug an identity/tax-form provider behind `clear()` · hosted winner pages on a stable domain.
+- **Wedge:** programs that already pay strangers in stablecoins and must collect paperwork first — crypto hackathons, bounty boards and ecosystem grants. Grants are the volume: the Ethereum Foundation's Ecosystem Support Program alone awarded **$32.6M in Q1 2025** (EF blog, allocation update, 2025-05-08), milestone by milestone, to teams around the world.
+- **Price (plan, not yet charged):** organizer pays 0.25% + $1 per settled payout; winners pay nothing. A 40-winner, $300k hackathon ≈ $790. A grant program the size of that one quarter ≈ $82k. Three programs of that size ≈ $1M a year.
+- **Next market:** the same lock → collect account → clear → pay → reconcile loop is how platforms pay contributors and creators abroad (Payoneer moved $87.5B in 2025 at a 120 bps take rate — FY2025 results, SEC exhibit 99.1). Claimdesk starts where the recipient has no account yet.
+- **Next 30 days:** one real program as a pilot (testnet, then mainnet with a token Kraken accepts on Tempo) · a KYC/W-8BEN provider whose webhook calls `clear()` with the verified address · winner pages on one stable domain (passkeys are bound to it).
 
 ## Architecture (spec first: [SPEC.md](SPEC.md))
 ```
-contracts/ClaimEscrow.sol   fund · register · clear (pays a registered account) · claim · revoke · rotateSigner · reclaim · two-step organizer
-src/domain/                 memo · claim link · winners list · award status machine · receipt              (pure, no SDKs)
-src/application/            createBatch · fundBatch · registerAccount · claimAward · statusBoard · receiptFor   (ports only)
-src/adapters/               Tempo escrow (batched calls) · winner gateway (sponsored) · ECB rates
-src/infrastructure/         organizer CLI · local server (console, winner pages, sponsoring relay) · relay policy
-web/                        claim page · account page (passkey sign-in, send) · PDF receipt · organizer console
+contracts/ClaimEscrow.sol    fund · register · changeRecipient · clear(expected, withholding) · claim · reissueLink · revoke · reclaim
+src/domain/                  memo · claim link · winners list · award status machine · receipt            (pure, no SDKs)
+src/application/             createBatch · fundBatch · registerAccount · claimAward · statusBoard · receiptFor (ports only)
+src/adapters/                Tempo escrow (batched calls, resilient RPC) · winner gateway (sponsored) · ECB rates
+src/infrastructure/          relay server (fee payer only) · organizer console (organizer key, local) · relay policy · paperwork records · CLI
+web/                         claim page · account page (passkey sign-in, send) · PDF receipt · console page
 ```
 A test fails if domain or application code imports an SDK, `node:` or an adapter.
 
 ## Honest limits
-- Testnet only. `clear()` records a hash of the organizer's paperwork record — Claimdesk does not run KYC or give tax advice; the receipt restates the ledger.
-- The organizer creates the claim keys, so the organizer (or anyone holding its private links file, written owner-only) could act as the link holder. Registering early removes that power for the award; `rotateSigner` kills a leaked link.
-- Passkeys in the recordings come from Chromium's virtual WebAuthn authenticator (same ceremony, no phone). A passkey is bound to the site's domain, so production needs one stable domain.
+- Testnet only. Claimdesk does not run KYC or give tax advice: `clear()` records the hash of the organizer's own record, and the receipt restates the ledger (its won amount is an ECB cross rate; a tax office may require its own rate).
+- Before a winner registers, the link is a bearer secret, and the organizer that generated it could use it too; `clear(expected)` and `reissueLink` contain that, but a malicious organizer can always simply not pay — it is the organizer's money until clearance.
+- Passkeys in the recordings come from Chromium's virtual WebAuthn authenticator (the same ceremony, no phone). A passkey is bound to the site's domain, so production needs one stable domain, and large awards should be moved to a wallet the winner already uses.
 - No users yet.
 
 ## Disclosure
