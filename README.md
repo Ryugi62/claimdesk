@@ -6,6 +6,8 @@
 
 Crypto World's Fair Hackathon (Colosseum, Fall 2026) · **Tempo track** · solo founder, university student · all code written during the hackathon (`git log`).
 
+**Live (Tempo testnet, no sign-up):** [winner account page](https://ryugi62.github.io/claimdesk/account.html) (passkey sign-in, gas sponsored by Tempo's public testnet sponsor) · [a paid $15,000 award, as its winner sees it](https://ryugi62.github.io/claimdesk/claim.html#v1.42431.0xc7022cb5e060daca0d6235aec384b57d3919682e.WF-26-GRAND-NBZI.0x1a15ba69647d1f7ef22fa806109c93eb4b74968aac7e0d64b80ecd3e10f978c4.aa45f1a7) — read from the escrow on chain. Hosted pages are the winner side only; the organizer console runs locally (`npm run console`, see *Run it*).
+
 ## The problem, in the operators' own words
 > "The prize fulfillment process can take up to 60 days from receipt of paperwork." … "make sure that your PayPal/Payoneer/Wise account is fully set up, that it can receive international transfers … If your prize is undeliverable, you may incur fees … or be delaying or forfeiting receipt of the prize." — Devpost Help Center, *How to Claim Your Hackathon Cash Prize* (updated 2026-08-21)
 >
@@ -15,7 +17,7 @@ Crypto World's Fair Hackathon (Colosseum, Fall 2026) · **Tempo track** · solo 
 
 Every program that pays strangers runs the same loop by hand: a payment form, a tax form and an identity check, then a payout address or a PayPal/Payoneer/Wise account that must already accept USD, then the payment, then reconciliation. The address and the paperwork travel separately, so nothing proves the person who was checked owns the account that gets paid.
 
-I'm on the receiving end. I'm a solo builder and engineering student in South Korea who sells software abroad and has entered about a dozen global hackathons since August. Each has its own payout rules — Devpost's prize desk, Superteam's payment form, this hackathon's wallet clause — and my own payout route home has a $100 minimum before anything moves.
+I'm on the receiving end. I'm a solo builder and engineering student in South Korea who runs a one-person software business and has entered twelve global hackathons since August. Each has its own payout rules — Devpost's prize desk, Superteam's payment form, this hackathon's wallet clause — and my own software storefront's payout provider won't release anything until the balance passes $100.
 
 ## How it works
 ```
