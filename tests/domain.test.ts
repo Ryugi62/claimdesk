@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { awardMemo, memoToRef } from '../src/domain/memo'
-import { encodeClaimLink, parseClaimLink } from '../src/domain/claimLink'
+import { encodeClaimLink, parseClaimLink, isKnownEscrow } from '../src/domain/claimLink'
 import { parseWinners } from '../src/domain/award'
 import { reconcile, describe as describeStatus } from '../src/domain/status'
 import { buildReceipt, formatUnits } from '../src/domain/receipt'
@@ -121,5 +121,19 @@ describe('AC-8 receipt', () => {
   it('formats base units exactly', () => {
     expect(formatUnits(1_234_567n, 6)).toBe('1.234567')
     expect(formatUnits(1_000_000n, 6)).toBe('1')
+  })
+})
+
+describe('claim page escrow allowlist', () => {
+  const known = '0xc7022cb5e060daca0d6235aec384b57d3919682e'
+  it('serves a configured escrow, in any letter case', () => {
+    expect(isKnownEscrow({ [known]: 1 }, known)).toBe(true)
+    expect(isKnownEscrow({ [known]: 1 }, '0xC7022CB5E060DACA0D6235AEC384B57D3919682E')).toBe(true)
+  })
+  it('refuses a look-alike escrow, a malformed address, and a page with no programs configured', () => {
+    expect(isKnownEscrow({ [known]: 1 }, '0x' + '11'.repeat(20))).toBe(false)
+    expect(isKnownEscrow({ [known]: 1 }, 'constructor')).toBe(false)
+    expect(isKnownEscrow({}, known)).toBe(false)
+    expect(isKnownEscrow(undefined, known)).toBe(false)
   })
 })

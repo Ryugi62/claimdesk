@@ -69,6 +69,8 @@ Pay every winner by link: an organizer locks each award on Tempo when it announc
 - AC-18 The console's expected recipient comes from the winner's paperwork (inbox or pasted), never from chain state; a paperwork address that differs from the registered account is shown as a mismatch and clearing is disabled.
 - AC-19 The relay answers only eth_chainId / eth_fillTransaction / eth_sendRawTransaction(Sync); a call that would revert is never sponsored and never counts against the per-award budget.
 - AC-20 `fund()` accepts only TIP-20 precompile tokens (0x20c0… addresses); the escrow balance always equals the sum of open awards (invariant suite).
+- AC-21 Given a new link scheduled for a registered award, when the registered account calls `changeRecipient` before the schedule goes stale, then it reverts `WrongState` and the schedule is unchanged; the organizer's second `reissueLink` after `reissueDelay` executes (forge + invariant). Because a reverting call is never sponsored (AC-19), the relay cannot be used to retry it.
+- AC-22 Given a claim link whose escrow is not in the page's configured escrows, when the winner opens it, then the page refuses it and offers no signing action.
 
 ## 7. Architecture (Clean)
 ```

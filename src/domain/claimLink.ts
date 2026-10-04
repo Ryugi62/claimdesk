@@ -37,3 +37,8 @@ export function parseClaimLink(link: string): ClaimLinkData {
   if (!ADDRESS.test(escrow) || !KEY.test(key) || !/^\d+$/.test(chain)) throw new Error('claim link is malformed')
   return { chainId: Number(chain), escrow, ref: decodeURIComponent(ref), claimKey: key }
 }
+
+/** A claim page serves only the escrows its program configured — a look-alike contract in a link is refused. */
+export function isKnownEscrow(allow: Record<string, number> | undefined, escrow: string): boolean {
+  return !!allow && ADDRESS.test(escrow) && Object.prototype.hasOwnProperty.call(allow, escrow.toLowerCase())
+}

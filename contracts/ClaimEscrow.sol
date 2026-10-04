@@ -216,9 +216,13 @@ contract ClaimEscrow {
         if (a.status != Status.Registered) revert WrongState();
         if (msg.sender != a.party) revert NotRecipient();
         if (next == address(0)) revert InvalidAward();
+        // A scheduled new link cannot be cancelled by the account it replaces — otherwise whoever registered
+        // through a forwarded link could reset the notice forever. Only a stale (expired) schedule is dropped.
+        PendingReissue memory p = pendingReissue[id];
+        if (p.notBefore != 0 && block.timestamp <= uint256(p.notBefore) + reissueDelay) revert WrongState();
         emit RecipientChanged(id, a.party, next);
         a.party = next;
-        delete pendingReissue[id]; // a scheduled new link was about the previous account
+        delete pendingReissue[id];
     }
 
     /// @notice Path B: pay a cleared award that had no registered account to the recipient the link's key signed for.

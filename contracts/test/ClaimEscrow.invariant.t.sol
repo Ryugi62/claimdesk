@@ -132,8 +132,14 @@ contract Handler is Test {
         bytes32 id = _pick(seed);
         ClaimEscrow.Award memory a = escrow.awardOf(id);
         if (a.status != ClaimEscrow.Status.Registered) return;
+        (address pendingBefore, uint64 notBefore) = escrow.pendingReissue(id);
+        bool live = notBefore != 0 && block.timestamp <= uint256(notBefore) + escrow.reissueDelay();
         vm.prank(a.party);
-        try escrow.changeRecipient(id, people[who % 3]) {} catch {}
+        try escrow.changeRecipient(id, people[who % 3]) {
+            assertTrue(!live, "recipient cancelled a live reissue schedule");
+        } catch {}
+        (address pendingAfter,) = escrow.pendingReissue(id);
+        if (live) assertEq(pendingAfter, pendingBefore, "live reissue schedule changed");
     }
 
     function warp(uint32 secs) external {

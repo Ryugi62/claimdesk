@@ -1,7 +1,7 @@
 import { Account } from 'viem/tempo'
 import { generatePrivateKey } from 'viem/accounts'
 import { isAddress } from 'viem'
-import { parseClaimLink } from '../src/domain/claimLink'
+import { parseClaimLink, isKnownEscrow } from '../src/domain/claimLink'
 import { awardMemo } from '../src/domain/memo'
 import { describe as describeStatus } from '../src/domain/status'
 import { registerAccount, claimAward, receiptFor } from '../src/application/payouts'
@@ -40,6 +40,11 @@ async function main() {
   }
   const cfg = await loadConfig()
   if (cfg.chainId !== link.chainId) throw new Error(`This page serves chain ${cfg.chainId}; the link is for chain ${link.chainId}.`)
+  if (!isKnownEscrow(cfg.escrows, link.escrow)) {
+    app.innerHTML = `<div class="program">${esc(cfg.program)}</div><h1>This link isn't from this program</h1><p class="err">It points at a contract (${esc(short(link.escrow))}) that ${esc(cfg.program)} did not set up. Don't sign anything — ask the organizer for your link through their official channel.</p>`
+    cta.style.display = 'none'
+    return
+  }
   await render(cfg, link.escrow as Hex, link.ref)
 }
 

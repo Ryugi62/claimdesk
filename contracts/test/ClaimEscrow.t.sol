@@ -203,7 +203,7 @@ contract ClaimEscrowTest is Test {
         assertEq(token.balanceOf(winner), AMOUNT);
     }
 
-    function test_reissueSchedule_goesStale_andChangeRecipientCancelsIt() public {
+    function test_reissueSchedule_goesStale_renewsNotice_andStaysLive() public {
         _fund(MIN_TTL);
         escrow.register(ID, winner, _regSig(winner));
         address s2 = vm.addr(0xBEEF);
@@ -214,9 +214,41 @@ contract ClaimEscrowTest is Test {
         escrow.reissueLink(ID, s2); // renews the notice instead of executing
         assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Registered));
         vm.prank(winner);
-        escrow.changeRecipient(ID, vm.addr(COLD_PK)); // cancels the pending schedule
+        vm.expectRevert(ClaimEscrow.WrongState.selector); // the renewed schedule is live again
+        escrow.changeRecipient(ID, vm.addr(COLD_PK));
+    }
+
+    function test_forwardee_cannotCancelAScheduledNewLink_reissueStillExecutes() public {
+        _fund(MIN_TTL);
+        escrow.register(ID, winner, _regSig(winner)); // stands in for whoever registered through a forwarded link
+        address s2 = vm.addr(0xBEEF);
+        vm.prank(organizer);
+        escrow.reissueLink(ID, s2); // scheduled, notice starts
+        for (uint256 i = 0; i < 5; i++) {
+            vm.warp(block.timestamp + 2 days / 5);
+            vm.prank(winner);
+            vm.expectRevert(ClaimEscrow.WrongState.selector);
+            escrow.changeRecipient(ID, vm.addr(COLD_PK + i)); // every attempt to reset the notice is refused
+        }
+        (address pendingSigner,) = escrow.pendingReissue(ID);
+        assertEq(pendingSigner, s2);
+        vm.prank(organizer);
+        escrow.reissueLink(ID, s2); // executes after the notice
+        assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Funded));
+        assertEq(escrow.awardOf(ID).party, s2);
+    }
+
+    function test_changeRecipient_allowedAgainOnceTheScheduleIsStale() public {
+        _fund(MIN_TTL);
+        escrow.register(ID, winner, _regSig(winner));
+        vm.prank(organizer);
+        escrow.reissueLink(ID, vm.addr(0xBEEF));
+        vm.warp(block.timestamp + 5 days); // organizer never executed it → stale
+        vm.prank(winner);
+        escrow.changeRecipient(ID, vm.addr(COLD_PK));
         (address pendingSigner,) = escrow.pendingReissue(ID);
         assertEq(pendingSigner, address(0));
+        assertEq(escrow.awardOf(ID).party, vm.addr(COLD_PK));
     }
 
     function test_withholdingAboveTheCap_reverts_cannotBecomeARedirect() public {

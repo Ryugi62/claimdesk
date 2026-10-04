@@ -1,0 +1,37 @@
+[
+  {
+    "step": "deploy-v8",
+    "escrow": "0xff048262aab382abc26b496af6cb3563226d01ab",
+    "reissueDelaySeconds": 20,
+    "tx": "0xd9fe27771885c0fef107a08aae23abe5d9345d8eaf623ecd724146c54bc2101f",
+    "link": "https://explore.testnet.tempo.xyz/address/0xff048262aab382abc26b496af6cb3563226d01ab"
+  },
+  {
+    "step": "fund",
+    "tx": "0xc7247fe1e399885715e11a3c1e6e09d8bf341b0d115126458c951e6367b42fa9"
+  },
+  {
+    "step": "forwardee-registered-first",
+    "tx": {
+      "hash": "0xc0c14801d49eb647207e914dbfed36db9c40695538fa991266305510197518a4",
+      "blockTime": "2026-10-04T01:35:10.000Z",
+      "id": "0x57462d56382d4600000000000000000000000000000000000000000000000000"
+    }
+  },
+  {
+    "step": "new-link-scheduled",
+    "tx": "0xc040afa877c7266bb42765fda10553c1a0f185410f98d2e1a832b1fad9f99cc9"
+  },
+  {
+    "step": "forwardee-changeRecipient-during-notice-refused",
+    "tx": "0x254ab2abf32d22ca7cf82ae5c5af0872fb05a6089da7fc2ab3374352ad1cc2b5",
+    "status": "reverted",
+    "error": "WrongState",
+    "link": "https://explore.testnet.tempo.xyz/tx/0x254ab2abf32d22ca7cf82ae5c5af0872fb05a6089da7fc2ab3374352ad1cc2b5"
+  },
+  {
+    "step": "new-link-issued-after-notice",
+    "tx": "0xe8ef7ca690b1be0aad0298ee5dbb958691b34d38ed88064b951c2ab470019507",
+    "statusAfter": "Funded"
+  }
+]

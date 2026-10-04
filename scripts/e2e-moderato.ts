@@ -115,6 +115,7 @@ async function main() {
   const newKey = viemClaimKeys.create()
   const scheduled = await escrow.reissueLink(P.F.id, newKey.address) // registered → schedules, with public notice
   record('F-reissue-scheduled', { tx: scheduled.hash, statusAfter: (await statusBoard(escrow))[P.F.id].status })
+  record('F-forwardee-cannot-cancel-the-new-link', await mustRevert(tempoClient(CHAIN, thief), undefined, dep.address, call('changeRecipient', [P.F.id, thief.address])))
   await new Promise((r) => setTimeout(r, 22_000))
   const reissue = await escrow.reissueLink(P.F.id, newKey.address) // after the notice period → executes
   record('F-old-link-refused', await mustRevert(tempoClient(CHAIN, thief), feePayer, dep.address, call('register', [P.F.id, thief.address, await sign('register', P.F.ref, thief.address)])))

@@ -29,6 +29,7 @@ cta.onclick = async () => {
     cta.textContent = 'Sign with your fingerprint or face…'
     const signature = await account.sign({ hash: paperworkDigest(escrow, cfg.chainId, awardMemo(ref), address as Hex, recordHash(f)) })
     const r = await fetch('api/paperwork', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...f, signature }) })
+    if (r.status === 404 || r.status === 405) throw new Error("This page is hosted without the organizer's paperwork service, so nothing was sent. In a real program the organizer runs it (npm run relay) or points paperworkUrl at their KYC provider.")
     const out = await r.json()
     if (!r.ok) throw new Error(out.error)
     document.getElementById('f')?.remove()
