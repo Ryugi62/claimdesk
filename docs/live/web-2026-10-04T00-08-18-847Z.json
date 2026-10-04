@@ -1,0 +1,71 @@
+{
+  "authenticator": "Chromium virtual WebAuthn authenticator (CTAP2, internal, user-verified)",
+  "log": [
+    {
+      "step": "A-registered-with-passkey",
+      "ref": "WF-2026-UNIV-B",
+      "seconds": 4.401,
+      "account": "0x798E94AcBcbaBF264D814eE71e91440823519a1b",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x59e1389f80bdef2f9fcb9b34cec32f8101fb77d1f59c8927048faf957e7d7a73"
+    },
+    {
+      "step": "A-console-clear",
+      "banner": "The paperwork names the registered account. Clearing pays it now."
+    },
+    {
+      "step": "A-paid",
+      "amount": "$5,000.00",
+      "local": "≈ 6,741,400 KRW",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0xfd998d6b59967fc516684cf96c151708c392cdc261755193ada9f22a07144d74"
+    },
+    {
+      "step": "A-sent-from-account",
+      "seconds": 1.831,
+      "summary": "Sent $12.50 to 0x0000…dEaD · tag DEPOSIT-TAG-1234 · view",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x3143bea32d7cde8f2da6d2dcfd4c9b02bfa063da202968dbd94e76742694497c"
+    },
+    {
+      "step": "F-forwardee-registered-first",
+      "ref": "WF-2026-TEMPO-04",
+      "account": "0xdf9c4b5a61E6613f2a8b4f3C4679f077847b50Da"
+    },
+    {
+      "step": "F-console-sees",
+      "registered": "0xdf9c4b5a61E6613f2a8b4f3C4679f077847b50Da",
+      "paperworkFor": "0xd99f4AEAb5790161F2e5E5B74983AeD7B34ad7e7",
+      "binding": "mismatch"
+    },
+    {
+      "step": "F-organizer-scheduled-new-link",
+      "tx": "0xd092bd15d2099d3488b5d3838c1b86734a251fab5e4fec12c353d28e2ac360ef",
+      "scheduled": true,
+      "notBefore": 1791072475
+    },
+    {
+      "step": "F-organizer-reissued",
+      "tx": "0xab3e409e3f706ce8e9dd147fc3de953ee11ac4df1bc90d4a973c59d029840871",
+      "scheduled": false
+    },
+    {
+      "step": "F-winner-paid",
+      "account": "0xd99f4AEAb5790161F2e5E5B74983AeD7B34ad7e7",
+      "intruder": "0xdf9c4b5a61E6613f2a8b4f3C4679f077847b50Da",
+      "banner": "The paperwork names the registered account. Clearing pays it now.",
+      "tx": "https://explore.testnet.tempo.xyz/tx/0x4ff785b2f28b5264b70601f16d247cb5b116a630bafbc8489b5cb3769b46cb19"
+    },
+    {
+      "step": "console-1280",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-390",
+      "horizontalOverflow": false,
+      "clippedContent": false
+    },
+    {
+      "step": "console-without-token",
+      "status": 403
+    }
+  ]
+}
