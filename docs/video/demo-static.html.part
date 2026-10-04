@@ -4,7 +4,7 @@
 *{box-sizing:border-box}html,body{margin:0;height:100%;background:#fff;color:var(--ink);font:24px/1.45 -apple-system,BlinkMacSystemFont,sans-serif}
 section{display:none;position:absolute;inset:0;padding:48px 72px 110px;flex-direction:column;justify-content:center}section.on{display:flex}
 .k{font-size:18px;font-weight:700;color:var(--blue);letter-spacing:.04em;text-transform:uppercase}h2{font-size:38px;margin:8px 0 14px}
-pre{background:#0F1720;color:#E6EDF3;border-radius:16px;padding:18px 22px;font:15.5px/1.5 ui-monospace,Menlo,monospace;overflow:hidden;margin:0;white-space:pre-wrap}
+pre{background:#0F1720;color:#E6EDF3;border-radius:16px;padding:18px 22px;font:13.5px/1.45 ui-monospace,Menlo,monospace;overflow:hidden;margin:0;white-space:pre-wrap}
 table{border-collapse:collapse;width:100%;font-size:19px}th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--mute);font-size:15px}
 .mono{font-family:ui-monospace,Menlo,monospace;font-size:16px;color:var(--sub)}
 .row{display:flex;gap:20px}.card{flex:1;background:var(--soft);border-radius:18px;padding:18px 20px;font-size:19px}.card b{display:block;font-size:22px;margin-bottom:6px}
