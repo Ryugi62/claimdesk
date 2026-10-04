@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+/// @dev Tempo's signature-verifier precompile: recovers secp256k1, P-256 and WebAuthn (passkey) signatures alike.
+interface ISignatureVerifier {
+    function recover(bytes32 hash, bytes calldata signature) external view returns (address);
+}
+
 /// @dev The two TIP-20 calls the escrow needs (Tempo's stablecoin token standard).
 interface ITIP20 {
     function transferWithMemo(address to, uint256 amount, bytes32 memo) external;
@@ -36,12 +41,14 @@ contract ClaimEscrow {
 
     struct PendingReissue {
         address signer;
-        uint64 notBefore;
+        uint64 notBefore; // executable from here …
+        // … until notBefore + reissueDelay; after that the schedule is stale and must be renewed (fresh notice)
     }
     mapping(bytes32 => PendingReissue) public pendingReissue;
     uint64 public constant MAX_TTL = 366 days;
     /// @dev Tempo's TIP-20 tokens live at precompile addresses starting 0x20c0 — no look-alike token contracts.
     bytes2 private constant TIP20_PREFIX = 0x20c0;
+    ISignatureVerifier public constant SIGNATURE_VERIFIER = ISignatureVerifier(0x5165300000000000000000000000000000000000);
 
     address public organizer;
     address public pendingOrganizer;
@@ -70,6 +77,7 @@ contract ClaimEscrow {
     error InvalidAward();
     error InvalidWithholding();
     error TransferFailed();
+    error PaperworkNotSigned();
 
     modifier onlyOrganizer() {
         if (msg.sender != organizer) revert NotOrganizer();
@@ -101,18 +109,25 @@ contract ClaimEscrow {
     }
 
     /// @notice The paperwork (tax form, identity check, acceptance) is complete for `expectedRecipient`.
-    /// @param paperworkHash hash of the organizer's paperwork record — the record stays off-chain.
-    /// @param expectedRecipient the account the paperwork was checked against: the registered account (paid now),
-    ///                          or zero when nobody registered (opens a bearer claim). Anything else reverts.
-    /// @param withheld tax withheld at source (≤ maxWithholdingBps of the award), sent to the fixed `taxAccount` now
-    ///                 with the award memo (0 for none).
-    function clear(bytes32 id, bytes32 paperworkHash, address expectedRecipient, uint96 withheld) external onlyOrganizer {
+    /// @param recordHash hash of the paperwork record the winner submitted.
+    /// @param expectedRecipient the account the paperwork names: the registered account (paid now — and the winner's
+    ///                          own signature over this paperwork must verify on-chain), or zero when nobody
+    ///                          registered (opens a bearer claim).
+    /// @param withheld tax withheld at source (≤ maxWithholdingBps of the award), sent to the fixed `taxAccount` now.
+    /// @param winnerSignature the registered account's signature (passkey or key) over paperworkDigest(id, account, recordHash).
+    function clear(bytes32 id, bytes32 recordHash, address expectedRecipient, uint96 withheld, bytes calldata winnerSignature)
+        external
+        onlyOrganizer
+    {
         Award storage a = _live(id);
         bool registered = a.status == Status.Registered;
         if (!registered && a.status != Status.Funded) revert WrongState();
         if (expectedRecipient != (registered ? a.party : address(0))) revert RecipientMismatch();
+        if (registered && SIGNATURE_VERIFIER.recover(paperworkDigest(id, a.party, recordHash), winnerSignature) != a.party) {
+            revert PaperworkNotSigned();
+        }
         if (uint256(withheld) * 10_000 > uint256(a.amount) * maxWithholdingBps) revert InvalidWithholding();
-        emit Cleared(id, paperworkHash, expectedRecipient, withheld, taxAccount);
+        emit Cleared(id, recordHash, expectedRecipient, withheld, taxAccount);
         if (withheld > 0) {
             a.amount -= withheld;
             ITIP20(a.token).transferWithMemo(taxAccount, withheld, id);
@@ -137,7 +152,8 @@ contract ClaimEscrow {
         if (newSigner == address(0)) revert InvalidAward();
         if (a.status == Status.Registered) {
             PendingReissue memory p = pendingReissue[id];
-            if (p.signer != newSigner || p.notBefore == 0) {
+            bool stale = p.notBefore != 0 && block.timestamp > uint256(p.notBefore) + reissueDelay;
+            if (p.signer != newSigner || p.notBefore == 0 || stale) {
                 uint64 after_ = uint64(block.timestamp) + reissueDelay;
                 pendingReissue[id] = PendingReissue(newSigner, after_);
                 emit ReissueScheduled(id, newSigner, after_);
@@ -202,6 +218,7 @@ contract ClaimEscrow {
         if (next == address(0)) revert InvalidAward();
         emit RecipientChanged(id, a.party, next);
         a.party = next;
+        delete pendingReissue[id]; // a scheduled new link was about the previous account
     }
 
     /// @notice Path B: pay a cleared award that had no registered account to the recipient the link's key signed for.
@@ -231,6 +248,11 @@ contract ClaimEscrow {
 
     function registerDigest(bytes32 id, address recipient) public view returns (bytes32) {
         return _digest("claimdesk.register", id, recipient);
+    }
+
+    /// @notice What the winner's account signs over its paperwork (domain-tagged; never a transaction hash).
+    function paperworkDigest(bytes32 id, address account, bytes32 recordHash) public view returns (bytes32) {
+        return keccak256(abi.encode(keccak256("claimdesk.paperwork"), address(this), block.chainid, id, account, recordHash));
     }
 
     // ------------------------------------------------------------------ internals

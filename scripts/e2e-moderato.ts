@@ -15,7 +15,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { encodeFunctionData, decodeErrorResult, keccak256, toHex, type Account } from 'viem'
 import { Actions } from 'viem/tempo'
-import { tempoClient, deployEscrow, balanceOf, TempoEscrow, TempoWinner, viemClaimKeys, claimEscrowAbi, ZERO, type TempoClient } from '../src/adapters/tempoEscrow'
+import { tempoClient, deployEscrow, balanceOf, TempoEscrow, TempoWinner, viemClaimKeys, claimEscrowAbi, paperworkDigest, ZERO, type TempoClient } from '../src/adapters/tempoEscrow'
 import { EcbRates } from '../src/adapters/ecbRates'
 import { createBatch, fundBatch, claimAward, registerAccount, statusBoard, receiptFor } from '../src/application/payouts'
 import { parseWinners } from '../src/domain/award'
@@ -39,6 +39,11 @@ function record(step: string, data: Record<string, unknown>) {
   console.log(JSON.stringify(row, big))
 }
 const hashOf = (s: string) => keccak256(toHex(s))
+/** the winner's own signature over its paperwork record — verified on-chain by Tempo's signature-verifier precompile */
+async function signedPaperwork(winner: { sign: (a: { hash: Hex }) => Promise<Hex> }, escrow: Hex, id: Hex, address: Hex, record: string) {
+  const recordHash = hashOf(record)
+  return { recordHash, signature: await winner.sign({ hash: paperworkDigest(escrow, CHAIN.id, id, address, recordHash) }) }
+}
 
 /** Sends a call EXPECTED to revert, with a fixed gas limit so it is mined; returns hash + decoded custom error. */
 async function mustRevert(sender: TempoClient, feePayer: Account | undefined, to: Hex, data: Hex) {
@@ -84,7 +89,7 @@ async function main() {
   const fundRcpt = await org.getTransactionReceipt({ hash: fundTx.hash })
   const shortTx = await fundBatch([P.D], escrow, PATH_USD, now + 75)
   record('fund-batch', { awards: long.length, tx: fundTx.hash, gasUsed: fundRcpt.gasUsed, gasPerAward: fundRcpt.gasUsed / BigInt(long.length), shortExpiryTx: shortTx.hash })
-  await escrow.clear(P.D.id, hashOf('D'), ZERO) // D is cleared at once so that only expiry stands between it and its holder
+  await escrow.clear(P.D.id, hashOf('D'), ZERO, 0n, '0x') // D is cleared at once so that only expiry stands between it and its holder
 
   const fresh = () => privateKeyToAccount(generatePrivateKey())
   const gw = (c: TempoClient) => new TempoWinner(c, feePayer)
@@ -95,7 +100,9 @@ async function main() {
   // A — register early; clearing for that account pays it; the link is powerless afterwards
   const wA = fresh(); const cA = tempoClient(CHAIN, wA)
   const regA = await registerAccount(P.A.link, wA.address, viemClaimKeys, gw(cA), { chainId: CHAIN.id })
-  const clrA = await escrow.clear(P.A.id, hashOf('A paperwork'), wA.address)
+  const pwA = await signedPaperwork(wA, dep.address, P.A.id, wA.address, 'A: W-8BEN, identity checked')
+  record('A-clear-with-a-forged-paperwork-signature-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.A.id, pwA.recordHash, wA.address, 0n, await fresh().sign({ hash: paperworkDigest(dep.address, CHAIN.id, P.A.id, wA.address, pwA.recordHash) })])))
+  const clrA = await escrow.clear(P.A.id, pwA.recordHash, wA.address, 0n, pwA.signature)
   record('A-register-then-clear', { registerTx: regA.hash, clearTx: clrA.hash, link: `${EXPLORER}/tx/${clrA.hash}`, winnerAfter: await balanceOf(org, PATH_USD, wA.address) })
   const x = fresh()
   record('A-link-reused-after-registration', await mustRevert(tempoClient(CHAIN, x), feePayer, dep.address, call('register', [P.A.id, x.address, await sign('register', P.A.ref, x.address)])))
@@ -103,7 +110,8 @@ async function main() {
   // F — a forwarded link registers first; the organizer's clearance names the real winner → refused → new link → paid
   const wF = fresh(); const thief = fresh()
   await registerAccount(P.F.link, thief.address, viemClaimKeys, gw(tempoClient(CHAIN, thief)), { chainId: CHAIN.id })
-  record('F-clear-for-real-winner-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.F.id, hashOf('F kyc'), wF.address, 0n])))
+  const pwF = await signedPaperwork(wF, dep.address, P.F.id, wF.address, 'F: W-8BEN, identity checked')
+  record('F-clear-for-real-winner-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.F.id, pwF.recordHash, wF.address, 0n, pwF.signature])))
   const newKey = viemClaimKeys.create()
   const scheduled = await escrow.reissueLink(P.F.id, newKey.address) // registered → schedules, with public notice
   record('F-reissue-scheduled', { tx: scheduled.hash, statusAfter: (await statusBoard(escrow))[P.F.id].status })
@@ -112,28 +120,29 @@ async function main() {
   record('F-old-link-refused', await mustRevert(tempoClient(CHAIN, thief), feePayer, dep.address, call('register', [P.F.id, thief.address, await sign('register', P.F.ref, thief.address)])))
   const newLink = encodeClaimLink('http://localhost:5174', { chainId: CHAIN.id, escrow: dep.address, ref: P.F.ref, claimKey: newKey.privateKey })
   const regF = await registerAccount(newLink, wF.address, viemClaimKeys, gw(tempoClient(CHAIN, wF)), { chainId: CHAIN.id })
-  const clrF = await escrow.clear(P.F.id, hashOf('F kyc'), wF.address)
+  const clrF = await escrow.clear(P.F.id, pwF.recordHash, wF.address, 0n, pwF.signature)
   record('F-reissued-and-paid', { reissueTx: reissue.hash, registerTx: regF.hash, clearTx: clrF.hash, winnerAfter: await balanceOf(org, PATH_USD, wF.address), thiefAfter: await balanceOf(org, PATH_USD, thief.address) })
 
   // G — withholding at source
   const wG = fresh()
   await registerAccount(P.G.link, wG.address, viemClaimKeys, gw(tempoClient(CHAIN, wG)), { chainId: CHAIN.id })
-  record('G-withholding-above-cap-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.G.id, hashOf('G'), wG.address, 30_000_001n])))
-  const clrG = await escrow.clear(P.G.id, hashOf('G w8ben no treaty'), wG.address, 30_000_000n)
+  const pwG = await signedPaperwork(wG, dep.address, P.G.id, wG.address, 'G: W-8BEN, no treaty')
+  record('G-withholding-above-cap-refused', await mustRevert(org, undefined, dep.address, call('clear', [P.G.id, pwG.recordHash, wG.address, 30_000_001n, pwG.signature])))
+  const clrG = await escrow.clear(P.G.id, pwG.recordHash, wG.address, 30_000_000n, pwG.signature)
   record('G-withholding', { clearTx: clrG.hash, winnerAfter: await balanceOf(org, PATH_USD, wG.address), taxAccountAfter: await balanceOf(org, PATH_USD, taxAccount.address) })
 
   // B — bearer path
   const wB = fresh(); const cB = tempoClient(CHAIN, wB)
   const sigB = await sign('claim', P.B.ref, wB.address)
   record('B-claim-before-clearance-refused', await mustRevert(cB, feePayer, dep.address, call('claim', [P.B.id, wB.address, sigB])))
-  await escrow.clear(P.B.id, hashOf('B'), ZERO)
+  await escrow.clear(P.B.id, hashOf('B'), ZERO, 0n, '0x')
   const t0 = Date.now()
   const paidB = await claimAward(P.B.link, wB.address, viemClaimKeys, gw(cB), { chainId: CHAIN.id })
   record('B-bearer-claim-paid', { tx: paidB.hash, link: `${EXPLORER}/tx/${paidB.hash}`, seconds: (Date.now() - t0) / 1000, winnerAfter: await balanceOf(org, PATH_USD, wB.address) })
   record('B-claim-twice-refused', await mustRevert(cB, feePayer, dep.address, call('claim', [P.B.id, wB.address, sigB])))
 
   // E — copied signature, different recipient
-  await escrow.clear(P.E.id, hashOf('E'), ZERO)
+  await escrow.clear(P.E.id, hashOf('E'), ZERO, 0n, '0x')
   const t = fresh()
   record('E-redirect-refused', await mustRevert(tempoClient(CHAIN, t), feePayer, dep.address, call('claim', [P.E.id, t.address, await sign('claim', P.E.ref, wB.address)])))
 

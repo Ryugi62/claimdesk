@@ -54,6 +54,9 @@ export async function txRef(client: TempoClient, receipt: { transactionHash: Hex
 }
 
 /** Deploys a new ClaimEscrow; `organizer` becomes its owner (defaults to the deployer). */
+/** Award ids the console/CLI/e2e use when the paperwork record is not known (bearer path). */
+export const NO_RECORD = ('0x' + '00'.repeat(32)) as Hex
+
 export async function deployEscrow(client: TempoClient, opts: { organizer?: Hex; minTtlSeconds?: number; taxAccount?: Hex; maxWithholdingBps?: number; reissueDelaySeconds?: number } = {}): Promise<{ address: Hex; tx: TxRef; block: bigint }> {
   const hash = await client.deployContract({
     abi: claimEscrowAbi, bytecode: claimEscrowBytecode as Hex,
@@ -158,12 +161,12 @@ export class TempoEscrow implements EscrowGateway {
       ...awards.map((a) => ({ to: this.address, data: encodeFunctionData({ abi: claimEscrowAbi, functionName: 'fund', args: [a.id, a.token, a.amount, BigInt(a.expiresAt), a.claimSigner] }) })),
     ])
   }
-  clear(id: Hex, paperworkHash: Hex, expectedRecipient: Hex, withheld = 0n) {
-    return this.send([this.call('clear', [id, paperworkHash, expectedRecipient, withheld])])
+  clear(id: Hex, recordHash: Hex, expectedRecipient: Hex, withheld = 0n, winnerSignature: Hex = '0x') {
+    return this.send([this.call('clear', [id, recordHash, expectedRecipient, withheld, winnerSignature])])
   }
   /** Several clearances in one Tempo transaction (batched calls — all or nothing). */
-  clearMany(items: { id: Hex; paperworkHash: Hex; expectedRecipient: Hex; withheld?: bigint }[]) {
-    return this.send(items.map((i) => this.call('clear', [i.id, i.paperworkHash, i.expectedRecipient, i.withheld ?? 0n])))
+  clearMany(items: { id: Hex; recordHash: Hex; expectedRecipient: Hex; withheld?: bigint; winnerSignature?: Hex }[]) {
+    return this.send(items.map((i) => this.call('clear', [i.id, i.recordHash, i.expectedRecipient, i.withheld ?? 0n, i.winnerSignature ?? '0x'])))
   }
   reissueLink(id: Hex, newSigner: Hex) { return this.send([this.call('reissueLink', [id, newSigner])]) }
   revoke(id: Hex) { return this.send([this.call('revoke', [id])]) }

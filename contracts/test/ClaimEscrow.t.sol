@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ClaimEscrow} from "../ClaimEscrow.sol";
 import {MockTIP20} from "./MockTIP20.sol";
+import {MockSignatureVerifier} from "./MockSignatureVerifier.sol";
 
 contract ClaimEscrowTest is Test {
     ClaimEscrow escrow;
@@ -11,8 +12,12 @@ contract ClaimEscrowTest is Test {
     address organizer = address(0xA11CE);
     uint256 claimPk = 0xC1A1;
     address claimSigner;
-    address winner = address(0xB0B);
-    address forwardee = address(0xF0F0);
+    uint256 constant WINNER_PK = 0xB0B;
+    uint256 constant FORWARDEE_PK = 0xF0F0;
+    uint256 constant COLD_PK = 0xC01D;
+    address winner = vm.addr(WINNER_PK);
+    address forwardee = vm.addr(FORWARDEE_PK);
+    bytes32 constant RECORD = keccak256("w8ben+kyc record");
     bytes32 constant ID = bytes32("WF-2026-TEMPO-03");
     uint96 constant AMOUNT = 10_000e6;
     uint64 constant MIN_TTL = 7 days;
@@ -26,6 +31,7 @@ contract ClaimEscrowTest is Test {
         MockTIP20 impl = new MockTIP20();
         vm.etch(address(0x20C0000000000000000000000000000000000001), address(impl).code);
         token = MockTIP20(address(0x20C0000000000000000000000000000000000001));
+        vm.etch(0x5165300000000000000000000000000000000000, address(new MockSignatureVerifier()).code);
         escrow = new ClaimEscrow(organizer, MIN_TTL, TAX, 3_000, 2 days);
         claimSigner = vm.addr(claimPk);
         token.mint(organizer, 1_000_000e6);
@@ -52,9 +58,21 @@ contract ClaimEscrowTest is Test {
         return _sig(claimPk, escrow.claimDigest(ID, recipient));
     }
 
+    function _pkOf(address a) internal view returns (uint256) {
+        if (a == winner) return WINNER_PK;
+        if (a == forwardee) return FORWARDEE_PK;
+        return COLD_PK;
+    }
+
+    /// the registered account's signature over its paperwork (verified on-chain by the precompile)
+    function _paperworkSig(address account) internal view returns (bytes memory) {
+        return _sig(_pkOf(account), escrow.paperworkDigest(ID, account, RECORD));
+    }
+
     function _clearFor(address expected) internal {
+        bytes memory sig = expected == address(0) ? bytes("") : _paperworkSig(expected);
         vm.prank(organizer);
-        escrow.clear(ID, keccak256("w8ben+kyc"), expected, 0);
+        escrow.clear(ID, RECORD, expected, 0, sig);
     }
 
     function _status() internal view returns (ClaimEscrow.Status) {
@@ -120,9 +138,10 @@ contract ClaimEscrowTest is Test {
     function test_frontRunRegistration_isCaughtByExpectedRecipient() public {
         _fund(MIN_TTL);
         escrow.register(ID, forwardee, _regSig(forwardee)); // someone with the link got there first
+        bytes memory winnerSig = _paperworkSig(winner);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
-        escrow.clear(ID, keccak256("kyc for the real winner"), winner, 0);
+        escrow.clear(ID, RECORD, winner, 0, winnerSig);
         // organizer reissues the link: scheduled first (the registered account gets notice), executed after the delay
         uint256 newPk = 0xBEEF;
         address newSigner = vm.addr(newPk);
@@ -150,7 +169,7 @@ contract ClaimEscrowTest is Test {
         escrow.register(ID, winner, _regSig(winner));
         vm.expectRevert(ClaimEscrow.NotRecipient.selector);
         escrow.changeRecipient(ID, forwardee);
-        address cold = address(0xC01D);
+        address cold = vm.addr(COLD_PK);
         vm.prank(winner);
         escrow.changeRecipient(ID, cold);
         _clearFor(cold);
@@ -161,18 +180,50 @@ contract ClaimEscrowTest is Test {
         _fund(MIN_TTL);
         escrow.register(ID, winner, _regSig(winner));
         uint96 tax = 3_000e6; // exactly the 30% cap
+        bytes memory sig = _paperworkSig(winner);
         vm.prank(organizer);
-        escrow.clear(ID, keccak256("w8ben: no treaty"), winner, tax);
+        escrow.clear(ID, RECORD, winner, tax, sig);
         assertEq(token.balanceOf(TAX), tax);
         assertEq(token.balanceOf(winner), AMOUNT - tax);
         assertEq(token.balanceOf(address(escrow)), 0);
+    }
+
+    function test_clear_requiresTheWinnersOwnPaperworkSignature() public {
+        _fund(MIN_TTL);
+        escrow.register(ID, winner, _regSig(winner));
+        bytes memory wrongSigner = _sig(FORWARDEE_PK, escrow.paperworkDigest(ID, winner, RECORD));
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.PaperworkNotSigned.selector);
+        escrow.clear(ID, RECORD, winner, 0, wrongSigner);
+        bytes memory otherRecord = _sig(WINNER_PK, escrow.paperworkDigest(ID, winner, keccak256("a different record")));
+        vm.prank(organizer);
+        vm.expectRevert(ClaimEscrow.PaperworkNotSigned.selector);
+        escrow.clear(ID, RECORD, winner, 0, otherRecord);
+        _clearFor(winner);
+        assertEq(token.balanceOf(winner), AMOUNT);
+    }
+
+    function test_reissueSchedule_goesStale_andChangeRecipientCancelsIt() public {
+        _fund(MIN_TTL);
+        escrow.register(ID, winner, _regSig(winner));
+        address s2 = vm.addr(0xBEEF);
+        vm.prank(organizer);
+        escrow.reissueLink(ID, s2); // scheduled
+        vm.warp(block.timestamp + 5 days); // past notBefore + delay → stale
+        vm.prank(organizer);
+        escrow.reissueLink(ID, s2); // renews the notice instead of executing
+        assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Registered));
+        vm.prank(winner);
+        escrow.changeRecipient(ID, vm.addr(COLD_PK)); // cancels the pending schedule
+        (address pendingSigner,) = escrow.pendingReissue(ID);
+        assertEq(pendingSigner, address(0));
     }
 
     function test_withholdingAboveTheCap_reverts_cannotBecomeARedirect() public {
         _fund(MIN_TTL);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.InvalidWithholding.selector);
-        escrow.clear(ID, bytes32(0), address(0), 3_000e6 + 1);
+        escrow.clear(ID, bytes32(0), address(0), 3_000e6 + 1, "");
     }
 
     function test_deploy_rejectsUnsafeWithholdingSettings() public {
@@ -216,7 +267,7 @@ contract ClaimEscrowTest is Test {
         _fund(MIN_TTL);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.RecipientMismatch.selector);
-        escrow.clear(ID, bytes32(0), winner, 0);
+        escrow.clear(ID, bytes32(0), winner, 0, "");
     }
 
     function test_pathB_redirect_highS_wrongLength_otherEscrow_revert() public {
@@ -281,7 +332,7 @@ contract ClaimEscrowTest is Test {
         assertEq(uint8(_status()), uint8(ClaimEscrow.Status.Revoked));
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.WrongState.selector);
-        escrow.clear(ID, bytes32(0), winner, 0);
+        escrow.clear(ID, bytes32(0), winner, 0, "");
     }
 
     // ---- expiry
@@ -310,7 +361,7 @@ contract ClaimEscrowTest is Test {
         vm.warp(block.timestamp + MIN_TTL);
         vm.prank(organizer);
         vm.expectRevert(ClaimEscrow.Expired.selector);
-        escrow.clear(ID, bytes32(0), address(0), 0);
+        escrow.clear(ID, bytes32(0), address(0), 0, "");
     }
 
     // ---- roles
@@ -319,7 +370,7 @@ contract ClaimEscrowTest is Test {
         escrow.fund(ID, address(token), AMOUNT, uint64(block.timestamp + MIN_TTL), claimSigner);
         _fund(MIN_TTL);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
-        escrow.clear(ID, bytes32(0), address(0), 0);
+        escrow.clear(ID, bytes32(0), address(0), 0, "");
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
         escrow.revoke(ID);
         vm.expectRevert(ClaimEscrow.NotOrganizer.selector);
@@ -355,11 +406,12 @@ contract ClaimEscrowTest is Test {
         uint8 p = path % 4;
         if (p == 0) {
             escrow.register(ID, winner, _regSig(winner));
+            bytes memory pw = _paperworkSig(winner);
             vm.prank(organizer);
-            escrow.clear(ID, bytes32(0), winner, tax);
+            escrow.clear(ID, RECORD, winner, tax, pw);
         } else if (p == 1) {
             vm.prank(organizer);
-            escrow.clear(ID, bytes32(0), address(0), tax);
+            escrow.clear(ID, bytes32(0), address(0), tax, "");
             escrow.claim(ID, winner, _claimSig(winner));
         } else if (p == 2) {
             vm.prank(organizer);

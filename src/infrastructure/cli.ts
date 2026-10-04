@@ -18,6 +18,7 @@ import { tempoClient, deployEscrow, TempoEscrow, viemClaimKeys, readAward, ZERO 
 import { createBatch, fundBatch, statusBoard } from '../application/payouts'
 import { encodeClaimLink } from '../domain/claimLink'
 import { recordPaperwork, verifyAgainst } from './paperwork'
+import { submissionsByRef, recordHash } from './paperworkInbox'
 import { parseWinners } from '../domain/award'
 import { awardMemo, memoToRef } from '../domain/memo'
 import { formatUnits } from '../domain/receipt'
@@ -82,10 +83,13 @@ async function main() {
       const expected = (bearer ? ZERO : flag('recipient')) as Hex | undefined
       if (!expected) throw new Error('pass --recipient <the payout address written in the paperwork> (or --bearer to open a bearer claim)')
       if (!bearer && expected.toLowerCase() !== (award.registered ?? '').toLowerCase()) throw new Error(`the paperwork names ${expected} but the link registered ${award.registered ?? 'nothing'} — reissue the link`)
+      const signed = bearer ? undefined : (submissionsByRef()[ref] ?? []).reverse().find((x) => x.address.toLowerCase() === expected.toLowerCase())
+      if (!bearer && !signed) throw new Error(`no paperwork signed by ${expected} for ${ref} in the inbox — the escrow verifies the winner's own signature`)
       const { hash } = recordPaperwork(ref, expected, flag('paperwork', '') ?? '')
       const pct = Number(flag('withhold-pct', '0'))
       const withheld = (award.amount * BigInt(Math.round(pct * 100))) / 10_000n
-      const tx = await e.clear(awardMemo(ref), hash, expected, withheld)
+      const tx = await e.clear(awardMemo(ref), signed ? recordHash(signed) : (('0x' + '00'.repeat(32)) as Hex), expected, withheld, (signed?.signature ?? '0x') as Hex)
+      void hash
       console.log(`cleared ${ref} for ${expected === ZERO ? 'a bearer claim' : expected}${withheld ? `, withheld ${formatUnits(withheld, 6)}` : ''} (paperwork hash ${hash})\n${EXPLORER}/tx/${tx.hash}`)
       break
     }
